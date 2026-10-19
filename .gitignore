@@ -1,0 +1,67 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Environment variables
+.env
+
+# Raw / Processed Data files (keep sample / test fixtures only)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/features/*
+!data/features/.gitkeep
+
+# Models / checkpoints
+*.pt
+*.bin
+*.onnx
+models/*
+!models/.gitkeep
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+
+# AI Assistant artifacts & caches
+.claude*
+CLAUDE.md
+.gemini/
+.antigravity/
+.system_generated/
+*.prompt
+chat_history/

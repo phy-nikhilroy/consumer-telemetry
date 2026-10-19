@@ -1,0 +1,16 @@
+spacy
+sentence-transformers
+faiss-cpu
+duckdb
+polars
+lightgbm
+scikit-learn
+lifetimes
+fastapi
+uvicorn
+pydantic
+httpx
+streamlit
+matplotlib
+seaborn
+pytest
