@@ -69,7 +69,7 @@ def calculate_extraction_confidence(extracted: Dict[str, Any]) -> float:
     return round(score, 4)
 
 
-def process_record(
+def process(
     raw_text: str,
     app_source: str = "unknown",
     timestamp: Optional[datetime] = None
@@ -160,7 +160,7 @@ def run_pipeline(input_jsonl_path: str, output_parquet_path: str) -> pl.DataFram
                 except ValueError:
                     dt = None
 
-            product = process_record(raw_text, app_source=app_source, timestamp=dt)
+            product = process(raw_text, app_source=app_source, timestamp=dt)
             record_dict = product.model_dump()
             # Convert specs list to comma-separated string for high-performance tabular storage
             record_dict["specs"] = ", ".join(record_dict["specs"])

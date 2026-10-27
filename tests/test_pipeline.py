@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 import polars as pl
 import pytest
-from src.ingestion.pipeline import process_record, run_pipeline, ExtractedProduct
+from src.ingestion.pipeline import process, run_pipeline, ExtractedProduct
 
 
-def test_process_record_structure():
+def test_process_structure():
     raw_text = "Sponsored 4.7 out of 5 stars Apple iPhone 15 (128 GB) ₹68,330 M.R.P: ₹75,920 (10% off) FREE delivery Buy Now"
-    prod = process_record(raw_text, app_source="amazon_in")
+    prod = process(raw_text, app_source="amazon_in")
 
     assert isinstance(prod, ExtractedProduct)
     assert prod.brand == "Apple"
@@ -20,8 +20,8 @@ def test_process_record_structure():
     assert prod.extraction_confidence >= 0.80
 
 
-def test_process_record_empty():
-    prod = process_record("")
+def test_process_empty():
+    prod = process("")
     assert isinstance(prod, ExtractedProduct)
     assert prod.brand is None
     assert prod.price is None
