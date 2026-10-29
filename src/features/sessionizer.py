@@ -13,13 +13,18 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import duckdb
-from src.features.database import DatabaseManager, DEFAULT_DB_PATH
+from src.config import (
+    DEFAULT_DB_PATH,
+    DEFAULT_SESSION_INACTIVITY_MINUTES,
+    DEFAULT_CROSS_APP_WINDOW_MINUTES,
+)
+from src.features.database import DatabaseManager
 
 
 def sessionize_events(
     con: Optional[duckdb.DuckDBPyConnection] = None,
     db_path: Optional[Union[str, Path]] = None,
-    inactivity_minutes: float = 30.0
+    inactivity_minutes: float = DEFAULT_SESSION_INACTIVITY_MINUTES
 ) -> int:
     """
     Computes session IDs using DuckDB SQL window functions with an inactivity cutoff.
@@ -82,7 +87,7 @@ def sessionize_events(
 def detect_cross_app_comparisons(
     con: Optional[duckdb.DuckDBPyConnection] = None,
     db_path: Optional[Union[str, Path]] = None,
-    max_window_minutes: float = 60.0
+    max_window_minutes: float = DEFAULT_CROSS_APP_WINDOW_MINUTES
 ) -> Dict[str, Any]:
     """
     Identifies sessions where a user browses the same canonical_product_id across

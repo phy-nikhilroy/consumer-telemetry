@@ -15,9 +15,10 @@ if str(PROJECT_ROOT) not in sys.path:
 import duckdb
 import polars as pl
 
-from src.features.database import DatabaseManager, DEFAULT_DB_PATH
+from src.config import DEFAULT_DB_PATH, PROCESSED_DATA_DIR
+from src.features.database import DatabaseManager
 
-DEFAULT_PARQUET_PATH = Path("data/processed/extracted_products.parquet")
+DEFAULT_PARQUET_PATH = PROCESSED_DATA_DIR / "extracted_products.parquet"
 
 
 def load_telemetry_to_warehouse(

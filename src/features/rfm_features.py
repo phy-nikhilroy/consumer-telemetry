@@ -18,16 +18,17 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import duckdb
 import polars as pl
-from src.features.database import DatabaseManager, DEFAULT_DB_PATH
+from src.config import DEFAULT_DB_PATH, RFM_FEATURES_PATH, USD_TO_INR_RATE
+from src.features.database import DatabaseManager
 
-DEFAULT_FEATURES_PATH = Path("data/features/rfm_features.parquet")
+DEFAULT_FEATURES_PATH = RFM_FEATURES_PATH
 
 
 def compute_rfm_features(
     reference_date: Union[str, datetime],
     con: Optional[duckdb.DuckDBPyConnection] = None,
     db_path: Optional[Union[str, Path]] = None,
-    usd_to_inr_rate: float = 83.0
+    usd_to_inr_rate: float = USD_TO_INR_RATE
 ) -> pl.DataFrame:
     """
     Computes 15+ Recency, Frequency, and Monetary features per user.

@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timedelta
+import json
 from pathlib import Path
 import sys
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Ensure consumer-telemetry root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -18,14 +19,21 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import duckdb
+import numpy as np
 import polars as pl
 
-from src.features.database import DatabaseManager, DEFAULT_DB_PATH
+from src.config import (
+    DEFAULT_DB_PATH,
+    TRAIN_FEATURES_PATH,
+    TEST_FEATURES_PATH,
+    SELECTED_FEATURES_PATH,
+)
+from src.features.database import DatabaseManager
 from src.features.rfm_features import compute_rfm_features
 from src.features.behavioral_features import compute_behavioral_features
 
-DEFAULT_TRAIN_PATH = Path("data/features/train_features.parquet")
-DEFAULT_TEST_PATH = Path("data/features/test_features.parquet")
+DEFAULT_TRAIN_PATH = TRAIN_FEATURES_PATH
+DEFAULT_TEST_PATH = TEST_FEATURES_PATH
 
 
 def compute_target_variables(
@@ -204,6 +212,40 @@ def print_target_distributions(train_df: pl.DataFrame, test_df: pl.DataFrame) ->
     print(f"{'Buyers (will_purchase = 1)':<32} | {train_buyers} ({train_rate:.1f}%)" + " " * 12 + f"| {test_buyers} ({test_rate:.1f}%)")
     print(f"{'App Switchers (will_switch = 1)':<32} | {train_switchers:<22} | {test_switchers:<22}")
     print(f"{'Avg Purchases (num_purchases)':<32} | {train_df['num_purchases_next_7d'].mean():.2f}" + " " * 17 + f"| {test_df['num_purchases_next_7d'].mean():.2f}")
+
+
+def get_modeling_matrices(
+    split: str = "train",
+    target_col: str = "will_purchase_next_7d",
+    features_path: Optional[Union[str, Path]] = None,
+    selected_features_path: Optional[Union[str, Path]] = None,
+) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+    """
+    Loads train or test feature matrix, filters to selected non-collinear features,
+    and returns (X, y, feature_names) ready for ML estimators.
+    """
+    if features_path is None:
+        features_path = TRAIN_FEATURES_PATH if split == "train" else TEST_FEATURES_PATH
+
+    f_file = Path(features_path)
+    if not f_file.exists():
+        raise FileNotFoundError(f"Feature matrix not found at {f_file}")
+
+    df = pl.read_parquet(f_file)
+
+    s_file = Path(selected_features_path) if selected_features_path else SELECTED_FEATURES_PATH
+    if s_file.exists():
+        with open(s_file, "r", encoding="utf-8") as f:
+            selected_info = json.load(f)
+        feature_names = [f for f in selected_info["selected_features"] if f in df.columns]
+    else:
+        ignore = {"user_id", "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d", "top_category_l1"}
+        feature_names = [c for c in df.columns if c not in ignore]
+
+    X = df.select(feature_names).to_pandas().fillna(0.0).to_numpy(dtype=np.float32)
+    y = df[target_col].to_numpy()
+
+    return X, y, feature_names
 
 
 if __name__ == "__main__":

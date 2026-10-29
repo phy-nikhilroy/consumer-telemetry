@@ -40,3 +40,10 @@ CREATE TABLE IF NOT EXISTS fact_cross_app_comparisons (
     last_viewed TIMESTAMP NOT NULL,
     duration_minutes DECIMAL(10,2) NOT NULL
 );
+
+
+-- Indexes for accelerated analytical filtering and session joins
+CREATE INDEX IF NOT EXISTS idx_fact_user_ts ON fact_events(user_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_fact_product ON fact_events(canonical_product_id);
+CREATE INDEX IF NOT EXISTS idx_fact_session ON fact_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_cross_app_user ON fact_cross_app_comparisons(user_id);

@@ -2,12 +2,12 @@
 DuckDB connection and schema management for consumer telemetry warehouse.
 """
 
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional, Union
+from typing import Generator, Optional, Union
 import duckdb
 
-DEFAULT_DB_PATH = Path("data/processed/consumer.duckdb")
-SCHEMA_SQL_PATH = Path(__file__).parent / "schema.sql"
+from src.config import DEFAULT_DB_PATH, SCHEMA_SQL_PATH
 
 
 class DatabaseManager:
@@ -79,3 +79,18 @@ def init_db(db_path: Optional[Union[str, Path]] = None) -> None:
     """
     mgr = DatabaseManager(db_path=db_path or DEFAULT_DB_PATH)
     mgr.init_schema()
+
+
+@contextmanager
+def get_db_session(db_path: Optional[Union[str, Path]] = None) -> Generator[duckdb.DuckDBPyConnection, None, None]:
+    """
+    Context manager providing safe connection lifecycle management.
+    Ensures connection is cleanly closed upon exit if not persistent in-memory.
+    """
+    mgr = DatabaseManager(db_path=db_path or DEFAULT_DB_PATH)
+    con = mgr.get_connection()
+    try:
+        yield con
+    finally:
+        if mgr._shared_connection is None:
+            con.close()

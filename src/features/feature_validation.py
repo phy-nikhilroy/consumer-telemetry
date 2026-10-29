@@ -20,8 +20,10 @@ import numpy as np
 import polars as pl
 from sklearn.ensemble import RandomForestClassifier
 
-DEFAULT_TRAIN_PATH = Path("data/features/train_features.parquet")
-DEFAULT_SELECTED_PATH = Path("data/features/selected_features.json")
+from src.config import TRAIN_FEATURES_PATH, SELECTED_FEATURES_PATH
+
+DEFAULT_TRAIN_PATH = TRAIN_FEATURES_PATH
+DEFAULT_SELECTED_PATH = SELECTED_FEATURES_PATH
 
 
 def audit_feature_quality(df: pl.DataFrame) -> Dict[str, Any]:
