@@ -13,6 +13,7 @@ from src.features.feature_store import (
     compute_target_variables,
     build_feature_matrix,
     generate_train_test_datasets,
+    get_modeling_matrices,
 )
 
 
@@ -101,3 +102,22 @@ def test_train_test_split_datasets(tmp_path):
     assert test_file.exists()
     assert train_df.shape == test_df.shape
     assert train_df.height == 50
+
+
+def test_get_modeling_matrices_train_and_test():
+    """Verifies get_modeling_matrices loads features and binary targets with selected features."""
+    db_path = Path("data/processed/consumer.duckdb")
+    if not db_path.exists():
+        pytest.skip("Warehouse database not available")
+
+    X_train, y_train, feat_names_train = get_modeling_matrices(split="train", target_col="will_purchase_next_7d")
+    assert X_train.shape[0] == 50
+    assert X_train.shape[1] == len(feat_names_train)
+    assert len(feat_names_train) == 18
+    assert len(y_train) == 50
+    assert set(pl.Series(y_train).unique().to_list()).issubset({0, 1})
+
+    X_test, y_test, feat_names_test = get_modeling_matrices(split="test", target_col="will_purchase_next_7d")
+    assert X_test.shape[0] == 50
+    assert feat_names_train == feat_names_test
+

@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from src.features.database import DatabaseManager
+from src.features.database import DatabaseManager, get_db_session
 from src.features.loader import load_telemetry_to_warehouse
 
 
@@ -68,3 +68,15 @@ def test_load_telemetry_to_warehouse(tmp_path):
         assert sample_prod[0] is not None
     finally:
         con.close()
+
+
+def test_get_db_session_context_manager(tmp_path):
+    """Verifies get_db_session opens connection, executes queries, and manages cleanup."""
+    db_file = tmp_path / "test_session.duckdb"
+
+    with get_db_session(db_path=db_file) as con:
+        con.execute("CREATE TABLE test_tbl (id INT, val VARCHAR)")
+        con.execute("INSERT INTO test_tbl VALUES (1, 'alpha')")
+        row = con.execute("SELECT val FROM test_tbl WHERE id = 1").fetchone()
+        assert row[0] == "alpha"
+
