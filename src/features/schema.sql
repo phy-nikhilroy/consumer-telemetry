@@ -27,3 +27,16 @@ CREATE TABLE IF NOT EXISTS dim_users (
     primary_app VARCHAR,
     total_events INTEGER
 );
+
+
+CREATE TABLE IF NOT EXISTS fact_cross_app_comparisons (
+    comparison_id VARCHAR PRIMARY KEY,
+    user_id VARCHAR NOT NULL,
+    session_id VARCHAR,
+    canonical_product_id VARCHAR NOT NULL,
+    primary_app VARCHAR NOT NULL,
+    compared_app VARCHAR NOT NULL,
+    first_viewed TIMESTAMP NOT NULL,
+    last_viewed TIMESTAMP NOT NULL,
+    duration_minutes DECIMAL(10,2) NOT NULL
+);
