@@ -15,7 +15,7 @@ class DatabaseManager:
     Manages DuckDB connections, schema initialization, and transactional queries.
     """
 
-    def __init__(self, db_path: Optional[Union[str, Path]] = None):
+    def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
         self.db_path = Path(db_path) if db_path and str(db_path) != ":memory:" else db_path
         self._shared_connection: Optional[duckdb.DuckDBPyConnection] = None
         if self.db_path and str(self.db_path) != ":memory:":

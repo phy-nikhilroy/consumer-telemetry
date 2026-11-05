@@ -35,6 +35,7 @@ class ExtractedProduct(BaseModel):
     @field_validator("action")
     @classmethod
     def validate_action(cls, v: str) -> str:
+        """Coerces an unrecognized action to "view" rather than rejecting the record."""
         valid_actions = {"view", "cart", "buy", "search", "wishlist"}
         return v if v in valid_actions else "view"
 

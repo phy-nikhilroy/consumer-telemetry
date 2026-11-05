@@ -76,7 +76,7 @@ class TaxonomyClassifier:
     Semantic Product Taxonomy Classifier using Sentence Transformers and FAISS.
     """
 
-    def __init__(self, model_name: str = MODEL_NAME, index_path: Optional[str] = None):
+    def __init__(self, model_name: str = MODEL_NAME, index_path: Optional[str] = None) -> None:
         self.model = SentenceTransformer(model_name)
         self.records: List[Dict[str, Any]] = TAXONOMY_RECORDS
         self.index_path = Path(index_path) if index_path else INDEX_PATH
@@ -99,6 +99,12 @@ class TaxonomyClassifier:
         self.build_index()
 
     def build_index(self) -> None:
+        """
+        Embeds every taxonomy record and writes the FAISS index and metadata to disk.
+
+        Embeddings are L2 normalized so that inner product search is equivalent to
+        cosine similarity.
+        """
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
 
         texts_to_embed = [rec["description"] for rec in self.records]
@@ -146,6 +152,12 @@ _classifier_instance: Optional[TaxonomyClassifier] = None
 
 
 def classify_product(product_title: str, brand: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Classifies a product using a lazily constructed shared classifier.
+
+    The classifier loads a sentence-transformer model and a FAISS index, so it is built
+    once per process and reused rather than reconstructed on every call.
+    """
     global _classifier_instance
     if _classifier_instance is None:
         _classifier_instance = TaxonomyClassifier()

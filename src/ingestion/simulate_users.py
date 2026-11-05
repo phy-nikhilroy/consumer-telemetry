@@ -161,7 +161,7 @@ class UserProfile:
         app_loyalty: float = 0.5,
         dormant_from_day: Optional[int] = None,
         price_tier: str = "mid",
-    ):
+    ) -> None:
         self.user_id = user_id
         self.archetype = archetype
         self.primary_app = primary_app
