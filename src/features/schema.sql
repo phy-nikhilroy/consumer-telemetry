@@ -7,7 +7,11 @@ CREATE TABLE IF NOT EXISTS fact_events (
     app_name VARCHAR NOT NULL,
     canonical_product_id VARCHAR,
     action VARCHAR NOT NULL,
-    price DECIMAL(10,2),
+    -- DECIMAL(18,2) rather than (10,2): a real clickstream overflowed the narrower
+    -- column. RetailRocket's obfuscated prices reach 1.25e8 against a (10,2) ceiling
+    -- of 1e8. Synthetic values peak near 1.3e5, so widening changes nothing already
+    -- stored and only removes a limit that real data does exceed.
+    price DECIMAL(18,2),
     currency VARCHAR,
     session_id VARCHAR
 );
@@ -18,7 +22,7 @@ CREATE TABLE IF NOT EXISTS dim_products (
     product_title VARCHAR,
     category_l1 VARCHAR,
     category_l2 VARCHAR,
-    avg_price DECIMAL(10,2)
+    avg_price DECIMAL(18,2)
 );
 
 CREATE TABLE IF NOT EXISTS dim_users (

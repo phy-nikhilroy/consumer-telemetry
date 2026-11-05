@@ -80,3 +80,48 @@ def test_get_db_session_context_manager(tmp_path):
         row = con.execute("SELECT val FROM test_tbl WHERE id = 1").fetchone()
         assert row[0] == "alpha"
 
+
+
+def test_price_columns_are_wide_enough_for_real_data():
+    """
+    Verifies the warehouse price columns can hold real-world magnitudes.
+
+    A real clickstream aborted the loader with a DECIMAL(10,2) overflow at 1.25e8.
+    Synthetic prices peak near 1.3e5, three orders of magnitude below that ceiling, so
+    the constraint was invisible until real data hit it.
+    """
+    db_mgr = DatabaseManager(db_path=":memory:")
+    db_mgr.init_schema()
+    con = db_mgr.get_connection()
+
+    large_price = 125_399_880.00
+    con.execute(
+        """
+        INSERT INTO fact_events (
+            event_id, user_id, timestamp, app_name,
+            canonical_product_id, action, price, currency, session_id
+        ) VALUES (
+            'evt_wide', 'user_wide', TIMESTAMP '2015-09-04 00:00:00', 'test_app',
+            'prod_wide', 'buy', ?, 'INR', 'sess_wide'
+        )
+        """,
+        [large_price],
+    )
+    stored = con.execute(
+        "SELECT price FROM fact_events WHERE event_id = 'evt_wide'"
+    ).fetchone()[0]
+    assert float(stored) == pytest.approx(large_price, rel=1e-9)
+
+    con.execute(
+        """
+        INSERT INTO dim_products (
+            canonical_product_id, brand, product_title,
+            category_l1, category_l2, avg_price
+        ) VALUES ('prod_wide', NULL, NULL, 'cat_1', NULL, ?)
+        """,
+        [large_price],
+    )
+    stored_avg = con.execute(
+        "SELECT avg_price FROM dim_products WHERE canonical_product_id = 'prod_wide'"
+    ).fetchone()[0]
+    assert float(stored_avg) == pytest.approx(large_price, rel=1e-9)

@@ -43,6 +43,9 @@ data/raw/*
 data/processed/*
 !data/processed/.gitkeep
 data/features/*
+# Externally downloaded real-world datasets. Large, third-party licensed, and
+# reproducible from the adapter, so they stay out of the repository.
+data/external/
 !data/features/.gitkeep
 !data/features/selected_features.json
 
