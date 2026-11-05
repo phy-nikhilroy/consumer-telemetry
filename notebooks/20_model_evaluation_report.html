@@ -8209,10 +8209,16 @@ unconstrained model would memorize it outright.
     <span class="p">{</span><span class="s2">"variant"</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">scores</span><span class="o">.</span><span class="n">items</span><span class="p">()}}</span>
     <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">scores</span> <span class="ow">in</span> <span class="n">evaluation</span><span class="p">[</span><span class="s2">"method_selection"</span><span class="p">][</span><span class="s2">"cv_scores"</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
 <span class="p">]))</span>
+<span class="n">cv</span> <span class="o">=</span> <span class="n">evaluation</span><span class="p">[</span><span class="s2">"method_selection"</span><span class="p">][</span><span class="s2">"cv_scores"</span><span class="p">]</span>
+<span class="n">best</span> <span class="o">=</span> <span class="n">evaluation</span><span class="p">[</span><span class="s2">"calibration_method"</span><span class="p">]</span>
+<span class="n">spread</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">"brier_score"</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">cv</span><span class="o">.</span><span class="n">values</span><span class="p">())</span> <span class="o">-</span> <span class="nb">min</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">"brier_score"</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">cv</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+
 <span class="nb">print</span><span class="p">()</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"The model optimizes log loss, a proper scoring rule, so it arrives already calibrated."</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"The uncalibrated Brier score is the best of the three, meaning no post-hoc correction"</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">"is warranted and the raw score can be read directly as an expected purchase rate."</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"The model optimizes log loss, a proper scoring rule, so it starts close to calibrated"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"and there is no large miscalibration to repair."</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Brier spread across all three variants: </span><span class="si">{</span><span class="n">spread</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">, so the choice is a refinement"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"rather than a correction. Selected variant: </span><span class="si">{</span><span class="n">best</span><span class="si">}</span><span class="s2">."</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">"Either way the score can be read directly as an expected purchase rate."</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -8245,9 +8251,11 @@ shape: (3, 4)
 │ sigmoid      ┆ 0.1382      ┆ 0.4395   ┆ 0.8721  │
 └──────────────┴─────────────┴──────────┴─────────┘
 
-The model optimizes log loss, a proper scoring rule, so it arrives already calibrated.
-The uncalibrated Brier score is the best of the three, meaning no post-hoc correction
-is warranted and the raw score can be read directly as an expected purchase rate.
+The model optimizes log loss, a proper scoring rule, so it starts close to calibrated
+and there is no large miscalibration to repair.
+Brier spread across all three variants: 0.0022, so the choice is a refinement
+rather than a correction. Selected variant: sigmoid.
+Either way the score can be read directly as an expected purchase rate.
 </pre>
 </div>
 </div>
