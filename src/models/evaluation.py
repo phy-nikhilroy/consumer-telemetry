@@ -31,7 +31,14 @@ import numpy as np
 import polars as pl
 from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV, calibration_curve
-from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import (
+    average_precision_score,
+    brier_score_loss,
+    log_loss,
+    precision_recall_curve,
+    roc_auc_score,
+    roc_curve,
+)
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 
 from src.config import (
@@ -50,6 +57,7 @@ from src.models.propensity import (
 CALIBRATION_PLOT_PATH = ARTIFACTS_DIR / "propensity_calibration_curve.png"
 LIFT_PLOT_PATH = ARTIFACTS_DIR / "propensity_lift_chart.png"
 GAINS_PLOT_PATH = ARTIFACTS_DIR / "propensity_cumulative_gains.png"
+ROC_PR_PLOT_PATH = ARTIFACTS_DIR / "propensity_roc_pr_curves.png"
 EVALUATION_SUMMARY_PATH = ARTIFACTS_DIR / "propensity_evaluation_summary.json"
 
 CALIBRATION_METHODS: Tuple[str, ...] = ("isotonic", "sigmoid")
@@ -187,6 +195,55 @@ def plot_calibration_curves(
     ax_hist.legend()
     ax_hist.grid(alpha=0.3, linestyle=":")
 
+    fig.tight_layout()
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    return out
+
+
+def plot_roc_and_pr_curves(
+    y_true: np.ndarray,
+    y_proba: np.ndarray,
+    output_path: Optional[Union[str, Path]] = None,
+) -> Path:
+    """
+    Saves the ROC and precision-recall curves side by side.
+
+    Both are threshold-free views of the same scores, but their baselines differ. The
+    ROC baseline is the diagonal regardless of class balance, whereas the PR baseline
+    is the positive class rate, which makes PR the more honest curve when positives are
+    a minority.
+    """
+    out = Path(output_path) if output_path else ROC_PR_PLOT_PATH
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    fpr, tpr, _ = roc_curve(y_true, y_proba)
+    precision, recall, _ = precision_recall_curve(y_true, y_proba)
+    roc_auc = roc_auc_score(y_true, y_proba)
+    pr_auc = average_precision_score(y_true, y_proba)
+    base_rate = float(np.mean(y_true))
+
+    fig, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(13, 5.4))
+
+    ax_roc.plot(fpr, tpr, color="#2f6f9f", linewidth=2, label=f"Model (AUC {roc_auc:.4f})")
+    ax_roc.plot([0, 1], [0, 1], "k:", label="Random (AUC 0.5)")
+    ax_roc.set_xlabel("False positive rate")
+    ax_roc.set_ylabel("True positive rate")
+    ax_roc.set_title("ROC Curve")
+    ax_roc.legend(loc="lower right")
+    ax_roc.grid(alpha=0.3, linestyle=":")
+
+    ax_pr.plot(recall, precision, color="#7a9f3f", linewidth=2, label=f"Model (AP {pr_auc:.4f})")
+    ax_pr.axhline(
+        base_rate, color="black", linestyle=":", label=f"Random (base rate {base_rate:.3f})"
+    )
+    ax_pr.set_xlabel("Recall")
+    ax_pr.set_ylabel("Precision")
+    ax_pr.set_title("Precision-Recall Curve")
+    ax_pr.legend(loc="lower left")
+    ax_pr.grid(alpha=0.3, linestyle=":")
+
+    fig.suptitle("Purchase Propensity: Discrimination Curves (Test Split)", fontsize=13)
     fig.tight_layout()
     fig.savefig(out, dpi=150)
     plt.close(fig)
@@ -453,6 +510,7 @@ def run_evaluation_pipeline(
     )
     lift_plot = plot_lift_chart(lift_df)
     gains_plot = plot_cumulative_gains(gains_df)
+    roc_pr_plot = plot_roc_and_pr_curves(y_test, proba_after)
 
     s_out = Path(summary_path) if summary_path else EVALUATION_SUMMARY_PATH
     summary = {
@@ -474,6 +532,7 @@ def run_evaluation_pipeline(
     print(f"Saved calibration plot to  {calibration_plot}")
     print(f"Saved lift chart to        {lift_plot}")
     print(f"Saved gains chart to       {gains_plot}")
+    print(f"Saved ROC/PR curves to     {roc_pr_plot}")
     print(f"Saved summary to           {s_out}")
 
     return {
@@ -493,6 +552,7 @@ def run_evaluation_pipeline(
             "calibration_plot": calibration_plot,
             "lift_plot": lift_plot,
             "gains_plot": gains_plot,
+            "roc_pr_plot": roc_pr_plot,
             "summary": s_out,
         },
     }
