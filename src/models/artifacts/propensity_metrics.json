@@ -1,0 +1,57 @@
+{
+  "target": "will_purchase_next_7d",
+  "feature_names": [
+    "view_to_cart_ratio",
+    "total_purchases_30d",
+    "days_since_last_cart_add",
+    "max_single_purchase",
+    "avg_order_value",
+    "cart_to_purchase_ratio",
+    "app_entropy",
+    "days_since_last_event",
+    "days_since_last_purchase",
+    "total_events_7d",
+    "total_purchases_7d",
+    "total_sessions_7d",
+    "weekend_event_share",
+    "cross_app_comparison_count",
+    "evening_event_share",
+    "avg_session_duration_minutes",
+    "avg_time_between_sessions_hours",
+    "total_spend_7d"
+  ],
+  "train": {
+    "n_samples": 400,
+    "positive_rate": 0.5125,
+    "roc_auc": 0.9431644777986242,
+    "pr_auc": 0.9508609843464748,
+    "f1": 0.86810551558753,
+    "log_loss": 0.3535530803457563,
+    "brier_score": 0.10505013214975918,
+    "threshold": 0.5,
+    "confusion_matrix": {
+      "true_negative": 164,
+      "false_positive": 31,
+      "false_negative": 24,
+      "true_positive": 181
+    },
+    "best_iteration": 50
+  },
+  "test": {
+    "n_samples": 400,
+    "positive_rate": 0.52,
+    "roc_auc": 0.898212139423077,
+    "pr_auc": 0.8943676332275068,
+    "f1": 0.8226600985221675,
+    "log_loss": 0.4196629574138835,
+    "brier_score": 0.1308019983608526,
+    "threshold": 0.5,
+    "confusion_matrix": {
+      "true_negative": 161,
+      "false_positive": 31,
+      "false_negative": 41,
+      "true_positive": 167
+    },
+    "best_iteration": 50
+  }
+}
