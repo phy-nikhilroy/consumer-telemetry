@@ -86,3 +86,79 @@ def test_reload_duckdb_warehouse(tmp_path):
         assert fact_rows == len(events)
     finally:
         con.close()
+
+
+def test_user_profiles_carry_latent_traits():
+    """Validates that latent behavioral traits are drawn within their clamped ranges."""
+    profiles = create_user_profiles(num_users=200, seed=7)
+
+    for p in profiles:
+        assert 0.45 <= p.activity_level <= 2.2
+        assert 0.25 <= p.buy_propensity <= 2.6
+        assert 0.40 <= p.price_sensitivity <= 2.5
+        assert 0.25 <= p.app_loyalty <= 0.95
+        assert p.dormant_from_day is None or 12 <= p.dormant_from_day <= 26
+
+    # Traits must actually vary across the population, otherwise there is no signal
+    # for the downstream models to learn.
+    assert len({round(p.buy_propensity, 4) for p in profiles}) > 100
+    assert len({round(p.activity_level, 4) for p in profiles}) > 100
+
+    # A minority of the population goes dormant partway through the window.
+    dormant = [p for p in profiles if p.dormant_from_day is not None]
+    assert 0 < len(dormant) < len(profiles) * 0.3
+
+
+def test_dormant_users_stop_generating_events():
+    """Verifies that is_active_on_day gates event generation after dormancy onset."""
+    profiles = create_user_profiles(num_users=100, seed=11)
+    dormant = next(p for p in profiles if p.dormant_from_day is not None)
+
+    assert dormant.is_active_on_day(dormant.dormant_from_day - 1) is True
+    assert dormant.is_active_on_day(dormant.dormant_from_day) is False
+    assert dormant.is_active_on_day(dormant.dormant_from_day + 3) is False
+
+    always_active = next(p for p in profiles if p.dormant_from_day is None)
+    assert always_active.is_active_on_day(0) is True
+    assert always_active.is_active_on_day(29) is True
+
+
+def test_effective_rates_respond_to_discount_depth():
+    """Verifies deeper discounts lift conversion, scaled by price sensitivity."""
+    profiles = create_user_profiles(num_users=50, seed=3)
+    bargain = next(p for p in profiles if p.archetype == "bargain_hunter")
+
+    assert bargain.effective_buy_rate(50) > bargain.effective_buy_rate(0)
+    assert bargain.effective_cart_rate(50) > bargain.effective_cart_rate(0)
+
+    # Rates stay valid probabilities even at maximum discount and propensity.
+    for pct in (0, 10, 25, 50):
+        for p in profiles:
+            assert 0.0 <= p.effective_buy_rate(pct) <= 1.0
+            assert 0.0 <= p.effective_cart_rate(pct) <= 1.0
+            assert p.effective_buy_rate(pct) + p.effective_cart_rate(pct) <= 1.0
+
+
+def test_archetype_conversion_ordering():
+    """Verifies loyalists convert far more often than window shoppers in simulation."""
+    events, profiles = simulate_events_dataset(
+        num_users=50,
+        days=10,
+        seed=21,
+        start_date=datetime(2026, 10, 1, tzinfo=timezone.utc),
+    )
+
+    by_archetype: dict[str, dict[str, int]] = {}
+    for e in events:
+        bucket = by_archetype.setdefault(e["archetype"], {"events": 0, "buys": 0})
+        bucket["events"] += 1
+        if e["action"] == "buy":
+            bucket["buys"] += 1
+
+    loyalist_rate = by_archetype["loyalist"]["buys"] / by_archetype["loyalist"]["events"]
+    window_rate = by_archetype["window_shopper"]["buys"] / by_archetype["window_shopper"]["events"]
+
+    assert loyalist_rate > window_rate
+    # Purchases must stay a realistic minority of all recorded interactions.
+    total_buys = sum(b["buys"] for b in by_archetype.values())
+    assert 0.0 < total_buys / len(events) < 0.10

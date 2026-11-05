@@ -88,7 +88,11 @@ def test_behavioral_features_warehouse_schema():
     for feat in expected_features:
         assert feat in df.columns, f"Missing behavioral feature: {feat}"
 
-    assert df.height == 50
+    # Population size is a simulation parameter; compare against the warehouse.
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        expected_users = con.execute("SELECT COUNT(*) FROM dim_users").fetchone()[0]
+    assert df.height == expected_users
+    assert df.height > 0
 
 
 def test_save_behavioral_features_parquet(tmp_path):

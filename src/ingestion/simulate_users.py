@@ -1,6 +1,14 @@
 """
-Simulates 30 days of e-commerce telemetry for 50 users across 5 behavioral archetypes.
-Routes simulated events through Week 1 extraction pipeline and populates DuckDB warehouse.
+Simulates 30 days of e-commerce telemetry across 5 behavioral archetypes.
+
+Each simulated user carries latent traits (activity level, purchase propensity, price
+sensitivity, app loyalty, and an optional dormancy onset) drawn once at profile creation.
+Those traits drive both the historical events that features are computed from and the
+forward events that targets are computed from, so the engineered feature store carries
+genuine predictive signal rather than per-archetype noise.
+
+Routes simulated events through the Week 1 extraction pipeline and populates the DuckDB
+warehouse.
 """
 
 from __future__ import annotations
@@ -11,7 +19,7 @@ from functools import lru_cache
 from pathlib import Path
 import random
 import sys
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Ensure consumer-telemetry root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -36,27 +44,171 @@ ARCHETYPES = [
 
 APPS = ["amazon_in", "flipkart", "walmart", "amazon_us"]
 
+# Per-archetype generative parameters.
+#
+# buy_rate is the baseline per-event probability of a "buy" action. The values are
+# deliberately low: at roughly 10 events per day over 30 days, a buy_rate of 0.027
+# yields about 8 purchases per user per month, which keeps the forward 7-day purchase
+# target in a learnable range instead of saturating at nearly 100 percent positive.
+#
+# cart_rate is the baseline per-event probability of a "cart" action.
+# events_per_day bounds the daily event volume before the per-user activity multiplier.
+# app_loyalty is the probability of staying on the user's primary app.
+# discount_sensitivity scales how strongly a deep discount lifts conversion.
+ARCHETYPE_PARAMS: Dict[str, Dict[str, Any]] = {
+    "loyalist": {
+        "events_per_day": (6, 14),
+        "buy_rate": 0.027,
+        "cart_rate": 0.110,
+        "app_loyalty": 0.80,
+        "discount_sensitivity": 0.8,
+    },
+    "impulse_buyer": {
+        "events_per_day": (5, 12),
+        "buy_rate": 0.018,
+        "cart_rate": 0.085,
+        "app_loyalty": 0.45,
+        "discount_sensitivity": 1.0,
+    },
+    "bargain_hunter": {
+        "events_per_day": (6, 15),
+        "buy_rate": 0.010,
+        "cart_rate": 0.060,
+        "app_loyalty": 0.35,
+        "discount_sensitivity": 3.0,
+    },
+    "comparison_shopper": {
+        "events_per_day": (8, 16),
+        "buy_rate": 0.0033,
+        "cart_rate": 0.040,
+        "app_loyalty": 0.28,
+        "discount_sensitivity": 1.6,
+    },
+    "window_shopper": {
+        "events_per_day": (12, 22),
+        "buy_rate": 0.0005,
+        "cart_rate": 0.022,
+        "app_loyalty": 0.30,
+        "discount_sensitivity": 0.5,
+    },
+}
+
+# Fraction of the population that goes dormant partway through the observation window.
+DORMANCY_SHARE = 0.12
+DORMANCY_ONSET_RANGE = (12, 26)
+
 
 class UserProfile:
-    """Represents a simulated shopper profile with behavioral constraints."""
+    """
+    Represents a simulated shopper profile with behavioral constraints and latent traits.
 
-    def __init__(self, user_id: str, archetype: str, primary_app: str):
+    The latent traits are the mechanism that makes downstream supervised learning
+    meaningful: they persist for the whole observation window, so a user's historical
+    behavior (which features summarize) and their future behavior (which targets
+    measure) are driven by the same underlying parameters.
+    """
+
+    def __init__(
+        self,
+        user_id: str,
+        archetype: str,
+        primary_app: str,
+        activity_level: float = 1.0,
+        buy_propensity: float = 1.0,
+        price_sensitivity: float = 1.0,
+        app_loyalty: float = 0.5,
+        dormant_from_day: Optional[int] = None,
+    ):
         self.user_id = user_id
         self.archetype = archetype
         self.primary_app = primary_app
+        # Multiplier on daily event volume.
+        self.activity_level = activity_level
+        # Multiplier on the archetype baseline buy and cart rates.
+        self.buy_propensity = buy_propensity
+        # Multiplier on the archetype discount sensitivity.
+        self.price_sensitivity = price_sensitivity
+        # Probability of choosing the primary app for any given event.
+        self.app_loyalty = app_loyalty
+        # Day offset after which the user stops generating events, or None if always active.
+        self.dormant_from_day = dormant_from_day
+
+    @property
+    def params(self) -> Dict[str, Any]:
+        """Returns the generative parameter block for this profile's archetype."""
+        return ARCHETYPE_PARAMS[self.archetype]
+
+    def is_active_on_day(self, day_offset: int) -> bool:
+        """Returns False once the user has gone dormant."""
+        return self.dormant_from_day is None or day_offset < self.dormant_from_day
+
+    def effective_buy_rate(self, discount_pct: int) -> float:
+        """
+        Returns this user's per-event purchase probability for an item at a given discount.
+
+        Combines the archetype baseline, the user's latent propensity multiplier, and a
+        discount uplift scaled by the user's price sensitivity.
+        """
+        params = self.params
+        base = params["buy_rate"] * self.buy_propensity
+        sensitivity = params["discount_sensitivity"] * self.price_sensitivity
+        uplift = 1.0 + sensitivity * (discount_pct / 100.0)
+        return min(0.60, base * uplift)
+
+    def effective_cart_rate(self, discount_pct: int) -> float:
+        """Returns this user's per-event cart-add probability at a given discount."""
+        params = self.params
+        base = params["cart_rate"] * (0.5 + 0.5 * self.buy_propensity)
+        sensitivity = params["discount_sensitivity"] * self.price_sensitivity
+        uplift = 1.0 + 0.5 * sensitivity * (discount_pct / 100.0)
+        return min(0.75, base * uplift)
 
 
-def create_user_profiles(num_users: int = 50, seed: int = 42) -> List[UserProfile]:
-    """Generates balanced user profiles assigned to archetypes."""
+def create_user_profiles(num_users: int = 400, seed: int = 42) -> List[UserProfile]:
+    """
+    Generates balanced user profiles assigned to archetypes, each with latent traits.
+
+    Traits are drawn from log-normal distributions so the population contains a realistic
+    long tail of highly active and highly convertive users rather than a single
+    homogeneous block per archetype.
+    """
     random.seed(seed)
-    profiles = []
+    profiles: List[UserProfile] = []
     archetypes_cycle = ARCHETYPES * (num_users // len(ARCHETYPES) + 1)
+
+    dormant_count = int(num_users * DORMANCY_SHARE)
+    dormant_ids = set(random.sample(range(1, num_users + 1), dormant_count)) if dormant_count else set()
 
     for i in range(1, num_users + 1):
         uid = f"user_{i:03d}"
         archetype = archetypes_cycle[i - 1]
+        params = ARCHETYPE_PARAMS[archetype]
+
         primary_app = random.choice(APPS)
-        profiles.append(UserProfile(user_id=uid, archetype=archetype, primary_app=primary_app))
+
+        # Latent traits. Log-normal keeps every multiplier strictly positive and
+        # right-skewed, clamped to avoid degenerate extremes.
+        activity_level = min(2.2, max(0.45, random.lognormvariate(0.0, 0.32)))
+        buy_propensity = min(2.6, max(0.25, random.lognormvariate(0.0, 0.52)))
+        price_sensitivity = min(2.5, max(0.40, random.lognormvariate(0.0, 0.38)))
+
+        # Loyalty jitters around the archetype baseline.
+        app_loyalty = min(0.95, max(0.25, params["app_loyalty"] + random.uniform(-0.10, 0.10)))
+
+        dormant_from_day = random.randint(*DORMANCY_ONSET_RANGE) if i in dormant_ids else None
+
+        profiles.append(
+            UserProfile(
+                user_id=uid,
+                archetype=archetype,
+                primary_app=primary_app,
+                activity_level=activity_level,
+                buy_propensity=buy_propensity,
+                price_sensitivity=price_sensitivity,
+                app_loyalty=app_loyalty,
+                dormant_from_day=dormant_from_day,
+            )
+        )
 
     return profiles
 
@@ -120,14 +272,17 @@ def _get_catalog_extraction(item: dict) -> dict:
 
 
 def simulate_events_dataset(
-    num_users: int = 50,
+    num_users: int = 400,
     days: int = 30,
     seed: int = 42,
     start_date: Optional[datetime] = None
 ) -> Tuple[List[Dict[str, Any]], List[UserProfile]]:
     """
-    Generates realistic 30-day simulated telemetry dataset for 50 users.
-    Yields 10,000+ events modeling 5 behavioral archetypes.
+    Generates a realistic multi-day simulated telemetry dataset.
+
+    Daily event volume, app choice, and conversion are all driven by the latent traits
+    held on each UserProfile, with a weekend activity uplift and an optional dormancy
+    onset per user.
     """
     random.seed(seed)
     profiles = create_user_profiles(num_users=num_users, seed=seed)
@@ -141,17 +296,16 @@ def simulate_events_dataset(
         for day_offset in range(days):
             current_day = start_date + timedelta(days=day_offset)
 
-            # Determine number of events per day based on archetype
-            if profile.archetype == "window_shopper":
-                events_today = random.randint(12, 22)
-            elif profile.archetype == "loyalist":
-                events_today = random.randint(6, 14)
-            elif profile.archetype == "comparison_shopper":
-                events_today = random.randint(8, 16)
-            elif profile.archetype == "bargain_hunter":
-                events_today = random.randint(6, 15)
-            else:  # impulse_buyer
-                events_today = random.randint(5, 12)
+            # Dormant users stop generating events entirely from their onset day.
+            if not profile.is_active_on_day(day_offset):
+                continue
+
+            # Daily event volume: archetype band, scaled by the user's latent activity
+            # level, with a weekend uplift so timing features carry real variation.
+            low, high = profile.params["events_per_day"]
+            weekend_multiplier = 1.25 if current_day.weekday() >= 5 else 1.0
+            events_today = int(round(random.randint(low, high) * profile.activity_level * weekend_multiplier))
+            events_today = max(1, events_today)
 
             # Generate daytime timestamps
             hour_offsets = sorted([random.uniform(0, 14) for _ in range(events_today)])
@@ -160,34 +314,23 @@ def simulate_events_dataset(
             while i < events_today:
                 ts = current_day + timedelta(hours=hour_offsets[i])
 
-                # App selection by archetype
-                if profile.archetype == "loyalist":
-                    app = profile.primary_app if random.random() < 0.80 else random.choice(APPS)
-                elif profile.archetype == "comparison_shopper":
-                    # Random app selection across 3+ apps
-                    app = random.choice(APPS)
+                # App selection driven by the user's latent loyalty.
+                if random.random() < profile.app_loyalty:
+                    app = profile.primary_app
                 else:
-                    app = random.choice(APPS)
+                    app = random.choice([a for a in APPS if a != profile.primary_app])
 
                 # Product selection & discounts
                 item = random.choice(CATALOG)
                 discount_pct = random.choice([0, 10, 15, 20, 35, 45, 50])
                 rating = round(random.uniform(3.5, 4.9), 1)
 
-                # Archetype-specific action probability
-                if profile.archetype == "loyalist":
-                    action = random.choices(["view", "cart", "buy"], weights=[0.50, 0.25, 0.25])[0]
-                elif profile.archetype == "comparison_shopper":
-                    action = random.choices(["view", "cart", "buy"], weights=[0.85, 0.12, 0.03])[0]
-                elif profile.archetype == "bargain_hunter":
-                    if discount_pct >= 30:
-                        action = random.choices(["view", "cart", "buy"], weights=[0.30, 0.35, 0.35])[0]
-                    else:
-                        action = random.choices(["view", "cart", "buy"], weights=[0.95, 0.04, 0.01])[0]
-                elif profile.archetype == "impulse_buyer":
-                    action = random.choices(["view", "cart", "buy"], weights=[0.40, 0.25, 0.35])[0]
-                else:  # window_shopper
-                    action = random.choices(["view", "cart", "buy"], weights=[0.96, 0.03, 0.01])[0]
+                # Action probability from the user's own effective conversion rates,
+                # which fold in archetype baseline, latent propensity, and discount depth.
+                buy_p = profile.effective_buy_rate(discount_pct)
+                cart_p = profile.effective_cart_rate(discount_pct)
+                view_p = max(0.0, 1.0 - buy_p - cart_p)
+                action = random.choices(["view", "cart", "buy"], weights=[view_p, cart_p, buy_p])[0]
 
                 currency = "INR" if app in ["amazon_in", "flipkart"] else "USD"
                 base_price = item["base_inr"] if currency == "INR" else item["base_usd"]
@@ -217,7 +360,8 @@ def simulate_events_dataset(
                 event_counter += 1
 
                 # If comparison shopper, simulate multi-app comparison within 1 hour
-                if profile.archetype == "comparison_shopper" and random.random() < 0.35 and (i + 1) < events_today:
+                comparison_chance = 0.35 if profile.archetype == "comparison_shopper" else 0.04
+                if random.random() < comparison_chance and (i + 1) < events_today:
                     i += 1
                     other_apps = [a for a in APPS if a != app]
                     comp_app = random.choice(other_apps)
@@ -354,7 +498,7 @@ def reload_duckdb_warehouse(
 
 
 def run_simulation(
-    num_users: int = 50,
+    num_users: int = 400,
     days: int = 30,
     db_path: Optional[str] = None,
     output_parquet: str = "data/processed/simulated_events.parquet"
@@ -386,7 +530,7 @@ def run_simulation(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simulate user shopping telemetry across archetypes.")
-    parser.add_argument("--users", type=int, default=50, help="Number of users to simulate (default: 50)")
+    parser.add_argument("--users", type=int, default=400, help="Number of users to simulate (default: 400)")
     parser.add_argument("--days", type=int, default=30, help="Number of days to simulate (default: 30)")
     args = parser.parse_args()
 

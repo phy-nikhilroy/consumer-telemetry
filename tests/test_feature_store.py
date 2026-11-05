@@ -66,8 +66,10 @@ def test_build_feature_matrix_warehouse():
 
     df = build_feature_matrix(reference_date="2026-10-18 00:00:00", prediction_window_days=7, db_path=db_path)
 
-    # Check shape: 50 users
-    assert df.height == 50
+    # One row per user in the warehouse; the population size is a simulation parameter.
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        expected_users = con.execute("SELECT COUNT(*) FROM dim_users").fetchone()[0]
+    assert df.height == expected_users
     assert df.width >= 35
 
     # Check 3 targets
@@ -101,7 +103,9 @@ def test_train_test_split_datasets(tmp_path):
     assert train_file.exists()
     assert test_file.exists()
     assert train_df.shape == test_df.shape
-    assert train_df.height == 50
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        expected_users = con.execute("SELECT COUNT(*) FROM dim_users").fetchone()[0]
+    assert train_df.height == expected_users
 
 
 def test_get_modeling_matrices_train_and_test():
@@ -110,14 +114,17 @@ def test_get_modeling_matrices_train_and_test():
     if not db_path.exists():
         pytest.skip("Warehouse database not available")
 
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        expected_users = con.execute("SELECT COUNT(*) FROM dim_users").fetchone()[0]
+
     X_train, y_train, feat_names_train = get_modeling_matrices(split="train", target_col="will_purchase_next_7d")
-    assert X_train.shape[0] == 50
+    assert X_train.shape[0] == expected_users
     assert X_train.shape[1] == len(feat_names_train)
     assert len(feat_names_train) == 18
-    assert len(y_train) == 50
+    assert len(y_train) == expected_users
     assert set(pl.Series(y_train).unique().to_list()).issubset({0, 1})
 
     X_test, y_test, feat_names_test = get_modeling_matrices(split="test", target_col="will_purchase_next_7d")
-    assert X_test.shape[0] == 50
+    assert X_test.shape[0] == expected_users
     assert feat_names_train == feat_names_test
 

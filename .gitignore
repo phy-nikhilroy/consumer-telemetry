@@ -61,6 +61,7 @@ models/*
 # AI Assistant artifacts & caches
 .claude*
 CLAUDE.md
+AGENTS.md
 .gemini/
 .antigravity/
 .system_generated/

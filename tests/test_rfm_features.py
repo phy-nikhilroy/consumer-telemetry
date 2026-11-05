@@ -78,7 +78,12 @@ def test_rfm_feature_column_names_and_types():
     for col in expected_features:
         assert col in df.columns, f"Missing feature column: {col}"
 
-    assert df.height == 50
+    # Population size is a simulation parameter, so assert against the warehouse itself
+    # rather than a hardcoded user count.
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        expected_users = con.execute("SELECT COUNT(*) FROM dim_users").fetchone()[0]
+    assert df.height == expected_users
+    assert df.height > 0
 
 
 def test_save_rfm_features_parquet(tmp_path):
