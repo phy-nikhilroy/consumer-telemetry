@@ -1,0 +1,145 @@
+{
+  "target": "will_purchase_next_7d",
+  "calibration_method": "sigmoid",
+  "method_selection": {
+    "best_method": "sigmoid",
+    "cv_scores": {
+      "uncalibrated": {
+        "brier_score": 0.15108675716974374,
+        "log_loss": 0.47132610184243084,
+        "roc_auc": 0.8566103814884303
+      },
+      "isotonic": {
+        "brier_score": 0.15628862720943876,
+        "log_loss": 0.6530961077949522,
+        "roc_auc": 0.848217636022514
+      },
+      "sigmoid": {
+        "brier_score": 0.15174697070520682,
+        "log_loss": 0.4739642866053434,
+        "roc_auc": 0.8557598499061914
+      }
+    },
+    "improves_on_uncalibrated": false
+  },
+  "test_metrics_uncalibrated": {
+    "brier_score": 0.1308019983608526,
+    "log_loss": 0.4196629574138835,
+    "roc_auc": 0.898212139423077,
+    "mean_predicted": 0.49271242323049774,
+    "observed_rate": 0.52
+  },
+  "test_metrics_calibrated": {
+    "brier_score": 0.13081124680588116,
+    "log_loss": 0.42037473730281844,
+    "roc_auc": 0.896885016025641,
+    "mean_predicted": 0.5016672799416946,
+    "observed_rate": 0.52
+  },
+  "top_decile_lift": 1.8269230769230769,
+  "capture_top_10_pct": 0.18269230769230768,
+  "capture_top_20_pct": 0.36538461538461536,
+  "capture_top_30_pct": 0.5144230769230769,
+  "decile_table": [
+    {
+      "decile": 1,
+      "users": 40,
+      "mean_predicted_probability": 0.9058801522439701,
+      "actual_purchasers": 38,
+      "actual_purchase_rate": 0.95,
+      "lift": 1.8269230769230769,
+      "cumulative_users_pct": 0.1,
+      "cumulative_capture_pct": 0.18269230769230768
+    },
+    {
+      "decile": 2,
+      "users": 40,
+      "mean_predicted_probability": 0.8542621953428495,
+      "actual_purchasers": 38,
+      "actual_purchase_rate": 0.95,
+      "lift": 1.8269230769230769,
+      "cumulative_users_pct": 0.2,
+      "cumulative_capture_pct": 0.36538461538461536
+    },
+    {
+      "decile": 3,
+      "users": 40,
+      "mean_predicted_probability": 0.7857598107506143,
+      "actual_purchasers": 31,
+      "actual_purchase_rate": 0.775,
+      "lift": 1.4903846153846154,
+      "cumulative_users_pct": 0.3,
+      "cumulative_capture_pct": 0.5144230769230769
+    },
+    {
+      "decile": 4,
+      "users": 40,
+      "mean_predicted_probability": 0.7182408130121525,
+      "actual_purchasers": 34,
+      "actual_purchase_rate": 0.85,
+      "lift": 1.6346153846153846,
+      "cumulative_users_pct": 0.4,
+      "cumulative_capture_pct": 0.6778846153846154
+    },
+    {
+      "decile": 5,
+      "users": 40,
+      "mean_predicted_probability": 0.5822813913313389,
+      "actual_purchasers": 28,
+      "actual_purchase_rate": 0.7,
+      "lift": 1.346153846153846,
+      "cumulative_users_pct": 0.5,
+      "cumulative_capture_pct": 0.8125
+    },
+    {
+      "decile": 6,
+      "users": 40,
+      "mean_predicted_probability": 0.4202065539214095,
+      "actual_purchasers": 20,
+      "actual_purchase_rate": 0.5,
+      "lift": 0.9615384615384615,
+      "cumulative_users_pct": 0.6,
+      "cumulative_capture_pct": 0.9086538461538461
+    },
+    {
+      "decile": 7,
+      "users": 40,
+      "mean_predicted_probability": 0.2957463430186113,
+      "actual_purchasers": 8,
+      "actual_purchase_rate": 0.2,
+      "lift": 0.38461538461538464,
+      "cumulative_users_pct": 0.7,
+      "cumulative_capture_pct": 0.9471153846153846
+    },
+    {
+      "decile": 8,
+      "users": 40,
+      "mean_predicted_probability": 0.21322163663647825,
+      "actual_purchasers": 8,
+      "actual_purchase_rate": 0.2,
+      "lift": 0.38461538461538464,
+      "cumulative_users_pct": 0.8,
+      "cumulative_capture_pct": 0.9855769230769231
+    },
+    {
+      "decile": 9,
+      "users": 40,
+      "mean_predicted_probability": 0.14799558285407732,
+      "actual_purchasers": 2,
+      "actual_purchase_rate": 0.05,
+      "lift": 0.09615384615384616,
+      "cumulative_users_pct": 0.9,
+      "cumulative_capture_pct": 0.9951923076923077
+    },
+    {
+      "decile": 10,
+      "users": 40,
+      "mean_predicted_probability": 0.0930783203054438,
+      "actual_purchasers": 1,
+      "actual_purchase_rate": 0.025,
+      "lift": 0.04807692307692308,
+      "cumulative_users_pct": 1.0,
+      "cumulative_capture_pct": 1.0
+    }
+  ]
+}
