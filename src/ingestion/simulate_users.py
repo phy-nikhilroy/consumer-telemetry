@@ -94,8 +94,49 @@ ARCHETYPE_PARAMS: Dict[str, Dict[str, Any]] = {
 }
 
 # Fraction of the population that goes dormant partway through the observation window.
-DORMANCY_SHARE = 0.12
-DORMANCY_ONSET_RANGE = (12, 26)
+#
+# This is the only source of churn signal in the dataset. BG/NBD infers a customer's
+# dropout probability from how long before the observation end their last purchase sits,
+# so a population where almost everyone stays active to the final day makes the dropout
+# parameter unidentifiable and collapses P(alive) to 1.0 for every user. A quarter of the
+# population going dormant, with onsets spread from the second week onward, gives the
+# model a real signal to fit.
+DORMANCY_SHARE = 0.25
+DORMANCY_ONSET_RANGE = (8, 24)
+
+# Price tiers in INR, used to give each shopper a consistent spending level.
+#
+# The catalog spans roughly 1,100 to 130,000 INR. Drawing from it uniformly gives every
+# user the same wildly dispersed order value distribution, so within-customer variance
+# swamps between-customer variance. Gamma-Gamma models each customer as having a stable
+# mean order value, and cannot be identified without one. Assigning each user a tier
+# affinity makes spend a persistent customer trait, as it is in reality: a budget
+# accessories buyer and a flagship phone buyer are different customers, not the same
+# customer on different days.
+PRICE_TIERS: Dict[str, Tuple[float, float]] = {
+    "budget": (0.0, 10_000.0),
+    "mid": (10_000.0, 50_000.0),
+    "premium": (50_000.0, float("inf")),
+}
+
+# Probability that a user picks a product from their own price tier.
+TIER_AFFINITY = 0.78
+
+
+def _catalog_by_tier() -> Dict[str, List[dict]]:
+    """Buckets the product catalog into price tiers by INR list price."""
+    buckets: Dict[str, List[dict]] = {name: [] for name in PRICE_TIERS}
+    for item in CATALOG:
+        price = float(item["base_inr"])
+        for name, (low, high) in PRICE_TIERS.items():
+            if low <= price < high:
+                buckets[name].append(item)
+                break
+    # Never leave a tier empty, or users assigned to it would have no products.
+    return {name: items or list(CATALOG) for name, items in buckets.items()}
+
+
+CATALOG_BY_TIER: Dict[str, List[dict]] = _catalog_by_tier()
 
 
 class UserProfile:
@@ -118,6 +159,7 @@ class UserProfile:
         price_sensitivity: float = 1.0,
         app_loyalty: float = 0.5,
         dormant_from_day: Optional[int] = None,
+        price_tier: str = "mid",
     ):
         self.user_id = user_id
         self.archetype = archetype
@@ -132,6 +174,19 @@ class UserProfile:
         self.app_loyalty = app_loyalty
         # Day offset after which the user stops generating events, or None if always active.
         self.dormant_from_day = dormant_from_day
+        # Preferred catalog price band, which keeps order values stable per customer.
+        self.price_tier = price_tier
+
+    def choose_product(self) -> dict:
+        """
+        Selects a catalog item, favouring the user's own price tier.
+
+        The occasional out-of-tier pick keeps some within-customer spend variance, which
+        the Gamma-Gamma model needs in order to have anything to estimate.
+        """
+        if random.random() < TIER_AFFINITY:
+            return random.choice(CATALOG_BY_TIER[self.price_tier])
+        return random.choice(CATALOG)
 
     @property
     def params(self) -> Dict[str, Any]:
@@ -197,6 +252,18 @@ def create_user_profiles(num_users: int = 400, seed: int = 42) -> List[UserProfi
 
         dormant_from_day = random.randint(*DORMANCY_ONSET_RANGE) if i in dormant_ids else None
 
+        # Spend tier is a persistent customer trait. Bargain hunters skew budget and
+        # loyalists skew premium, but every archetype spans all three tiers.
+        if archetype == "bargain_hunter":
+            tier_weights = [0.60, 0.30, 0.10]
+        elif archetype == "loyalist":
+            tier_weights = [0.20, 0.40, 0.40]
+        elif archetype == "window_shopper":
+            tier_weights = [0.25, 0.35, 0.40]
+        else:
+            tier_weights = [0.34, 0.40, 0.26]
+        price_tier = random.choices(list(PRICE_TIERS.keys()), weights=tier_weights)[0]
+
         profiles.append(
             UserProfile(
                 user_id=uid,
@@ -207,6 +274,7 @@ def create_user_profiles(num_users: int = 400, seed: int = 42) -> List[UserProfi
                 price_sensitivity=price_sensitivity,
                 app_loyalty=app_loyalty,
                 dormant_from_day=dormant_from_day,
+                price_tier=price_tier,
             )
         )
 
@@ -321,7 +389,7 @@ def simulate_events_dataset(
                     app = random.choice([a for a in APPS if a != profile.primary_app])
 
                 # Product selection & discounts
-                item = random.choice(CATALOG)
+                item = profile.choose_product()
                 discount_pct = random.choice([0, 10, 15, 20, 35, 45, 50])
                 rating = round(random.uniform(3.5, 4.9), 1)
 

@@ -2,96 +2,96 @@
   "binary_target": "will_switch_app_next_7d",
   "feature_names": [
     "view_to_cart_ratio",
+    "days_since_last_event",
+    "total_spend_30d",
     "total_purchases_30d",
     "days_since_last_cart_add",
-    "max_single_purchase",
-    "avg_order_value",
-    "cart_to_purchase_ratio",
-    "app_entropy",
-    "days_since_last_event",
-    "days_since_last_purchase",
-    "total_events_7d",
     "total_purchases_7d",
     "total_sessions_7d",
+    "total_events_7d",
+    "dominant_app_share",
+    "max_single_purchase",
+    "total_spend_7d",
     "weekend_event_share",
-    "cross_app_comparison_count",
-    "evening_event_share",
     "avg_session_duration_minutes",
+    "avg_order_value",
+    "total_sessions_30d",
     "avg_time_between_sessions_hours",
-    "total_spend_7d"
+    "cross_app_comparison_count",
+    "cart_to_purchase_ratio"
   ],
   "binary_train": {
     "n_samples": 400,
-    "positive_rate": 0.3075,
-    "roc_auc": 0.8919315546946083,
-    "pr_auc": 0.8216587881126398,
-    "f1": 0.6528497409326425,
-    "accuracy": 0.8325,
-    "log_loss": 0.4363403989494924,
+    "positive_rate": 0.2575,
+    "roc_auc": 0.9364192082638685,
+    "pr_auc": 0.843961507897797,
+    "f1": 0.7159090909090909,
+    "accuracy": 0.875,
+    "log_loss": 0.32742459419853276,
     "confusion_matrix": {
-      "true_negative": 270,
-      "false_positive": 7,
-      "false_negative": 60,
+      "true_negative": 287,
+      "false_positive": 10,
+      "false_negative": 40,
       "true_positive": 63
     }
   },
   "binary_test": {
     "n_samples": 400,
-    "positive_rate": 0.3475,
-    "roc_auc": 0.8310868546542076,
-    "pr_auc": 0.7504463234399116,
-    "f1": 0.46875,
-    "accuracy": 0.745,
-    "log_loss": 0.50932977795379,
+    "positive_rate": 0.2675,
+    "roc_auc": 0.8573889190137476,
+    "pr_auc": 0.6775490595951846,
+    "f1": 0.5862068965517241,
+    "accuracy": 0.82,
+    "log_loss": 0.41106673641433206,
     "confusion_matrix": {
-      "true_negative": 253,
-      "false_positive": 8,
-      "false_negative": 94,
-      "true_positive": 45
+      "true_negative": 277,
+      "false_positive": 16,
+      "false_negative": 56,
+      "true_positive": 51
     }
   },
   "binary_test_tuned_threshold": {
     "n_samples": 400,
-    "positive_rate": 0.3475,
-    "roc_auc": 0.8310868546542076,
-    "pr_auc": 0.7504463234399116,
-    "f1": 0.6390041493775933,
-    "accuracy": 0.7825,
-    "log_loss": 0.50932977795379,
+    "positive_rate": 0.2675,
+    "roc_auc": 0.8573889190137476,
+    "pr_auc": 0.6775490595951846,
+    "f1": 0.6575342465753424,
+    "accuracy": 0.8125,
+    "log_loss": 0.41106673641433206,
     "confusion_matrix": {
-      "true_negative": 236,
-      "false_positive": 25,
-      "false_negative": 62,
-      "true_positive": 77
+      "true_negative": 253,
+      "false_positive": 40,
+      "false_negative": 35,
+      "true_positive": 72
     }
   },
-  "tuned_threshold": 0.42999999999999994,
+  "tuned_threshold": 0.36999999999999994,
   "multiclass_test": {
     "n_samples": 400,
-    "accuracy": 0.6775,
-    "macro_f1": 0.6159071074387882,
-    "weighted_f1": 0.6673823244283171,
-    "multi_log_loss": 0.7211588487529669,
+    "accuracy": 0.765,
+    "macro_f1": 0.6424198768740216,
+    "weighted_f1": 0.7556853132413249,
+    "multi_log_loss": 0.5976291582174276,
     "class_distribution": {
-      "no_purchase": 192,
-      "bought_on_dominant_app": 69,
-      "switched_app": 139
+      "no_purchase": 242,
+      "bought_on_dominant_app": 51,
+      "switched_app": 107
     },
     "confusion_matrix": [
       [
-        169,
+        223,
+        5,
+        14
+      ],
+      [
         10,
-        13
+        19,
+        22
       ],
       [
-        21,
-        32,
-        16
-      ],
-      [
-        41,
         28,
-        70
+        15,
+        64
       ]
     ],
     "labels": [
@@ -104,36 +104,36 @@
     {
       "rank": 1,
       "feature": "view_to_cart_ratio",
-      "mean_abs_shap": 0.3401535330499209,
-      "direction": 0.8195139943392417,
+      "mean_abs_shap": 0.604535690929956,
+      "direction": 0.8006584521895105,
       "effect": "increases switching"
     },
     {
       "rank": 2,
-      "feature": "days_since_last_cart_add",
-      "mean_abs_shap": 0.3324568741758371,
-      "direction": -0.8173502117644327,
+      "feature": "days_since_last_event",
+      "mean_abs_shap": 0.3615477122642268,
+      "direction": -0.8709780828179473,
       "effect": "reduces switching"
     },
     {
       "rank": 3,
-      "feature": "app_entropy",
-      "mean_abs_shap": 0.219124281487368,
-      "direction": 0.8841826163493063,
+      "feature": "total_purchases_7d",
+      "mean_abs_shap": 0.2732419545016205,
+      "direction": 0.7813443004217961,
       "effect": "increases switching"
     },
     {
       "rank": 4,
-      "feature": "max_single_purchase",
-      "mean_abs_shap": 0.081162637204,
-      "direction": 0.750806218684838,
-      "effect": "increases switching"
+      "feature": "weekend_event_share",
+      "mean_abs_shap": 0.17700512187639983,
+      "direction": -0.6532863290663352,
+      "effect": "reduces switching"
     },
     {
       "rank": 5,
-      "feature": "cross_app_comparison_count",
-      "mean_abs_shap": 0.07316753420618415,
-      "direction": -0.7782297186797099,
+      "feature": "days_since_last_cart_add",
+      "mean_abs_shap": 0.15389597286512102,
+      "direction": -0.6494959637091714,
       "effect": "reduces switching"
     }
   ]

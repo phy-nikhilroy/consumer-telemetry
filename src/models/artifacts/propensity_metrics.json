@@ -2,56 +2,56 @@
   "target": "will_purchase_next_7d",
   "feature_names": [
     "view_to_cart_ratio",
+    "days_since_last_event",
+    "total_spend_30d",
     "total_purchases_30d",
     "days_since_last_cart_add",
-    "max_single_purchase",
-    "avg_order_value",
-    "cart_to_purchase_ratio",
-    "app_entropy",
-    "days_since_last_event",
-    "days_since_last_purchase",
-    "total_events_7d",
     "total_purchases_7d",
     "total_sessions_7d",
+    "total_events_7d",
+    "dominant_app_share",
+    "max_single_purchase",
+    "total_spend_7d",
     "weekend_event_share",
-    "cross_app_comparison_count",
-    "evening_event_share",
     "avg_session_duration_minutes",
+    "avg_order_value",
+    "total_sessions_30d",
     "avg_time_between_sessions_hours",
-    "total_spend_7d"
+    "cross_app_comparison_count",
+    "cart_to_purchase_ratio"
   ],
   "train": {
     "n_samples": 400,
-    "positive_rate": 0.5125,
-    "roc_auc": 0.9431644777986242,
-    "pr_auc": 0.9508609843464748,
-    "f1": 0.86810551558753,
-    "log_loss": 0.3535530803457563,
-    "brier_score": 0.10505013214975918,
+    "positive_rate": 0.4175,
+    "roc_auc": 0.9566960499601656,
+    "pr_auc": 0.9293889087645478,
+    "f1": 0.8688046647230321,
+    "log_loss": 0.29566112930751537,
+    "brier_score": 0.08503030172747143,
     "threshold": 0.5,
     "confusion_matrix": {
-      "true_negative": 164,
-      "false_positive": 31,
-      "false_negative": 24,
-      "true_positive": 181
+      "true_negative": 206,
+      "false_positive": 27,
+      "false_negative": 18,
+      "true_positive": 149
     },
-    "best_iteration": 50
+    "best_iteration": 61
   },
   "test": {
     "n_samples": 400,
-    "positive_rate": 0.52,
-    "roc_auc": 0.898212139423077,
-    "pr_auc": 0.8943676332275068,
-    "f1": 0.8226600985221675,
-    "log_loss": 0.4196629574138835,
-    "brier_score": 0.1308019983608526,
+    "positive_rate": 0.395,
+    "roc_auc": 0.9144785019353489,
+    "pr_auc": 0.8603486070667118,
+    "f1": 0.8214285714285714,
+    "log_loss": 0.37333007029902127,
+    "brier_score": 0.11564957863471045,
     "threshold": 0.5,
     "confusion_matrix": {
-      "true_negative": 161,
-      "false_positive": 31,
-      "false_negative": 41,
-      "true_positive": 167
+      "true_negative": 202,
+      "false_positive": 40,
+      "false_negative": 20,
+      "true_positive": 138
     },
-    "best_iteration": 50
+    "best_iteration": 61
   }
 }
