@@ -8,6 +8,7 @@ possible range, and consistent schemas across the train and test splits.
 
 from pathlib import Path
 
+import duckdb
 import numpy as np
 import polars as pl
 import pytest
@@ -209,3 +210,79 @@ def test_selected_features_are_present_and_pruned(train):
     # Pruned features must not also appear as selected.
     overlap = set(selected) & set(info.get("pruned_collinear_features", []))
     assert not overlap, f"Features both selected and pruned: {overlap}"
+
+
+def test_discount_features_are_not_dead(train):
+    """
+    Verifies the discount features carry real variation rather than silent zeros.
+
+    A range check alone does not catch this. These two columns were once zero for 386 of
+    400 users with only 13 distinct values and a maximum of 4.72, and every bound
+    assertion still passed, because an all-zero column sits comfortably inside [0, 100].
+    The failure was invisible to every model that consumed it.
+    """
+    purchasers = train.filter(pl.col("total_purchases_30d") > 0)
+    if purchasers.height == 0:
+        pytest.skip("No purchasers in the feature matrix")
+
+    discount = purchasers["avg_discount_pct_on_purchases"].cast(pl.Float64).drop_nulls()
+    share = purchasers["pct_purchases_with_discount"].cast(pl.Float64).drop_nulls()
+
+    # A feature with a handful of distinct values across hundreds of users is dead,
+    # whatever its nominal range.
+    assert discount.n_unique() > 20, (
+        f"avg_discount_pct_on_purchases has only {discount.n_unique()} distinct values"
+    )
+    assert share.n_unique() > 5
+
+    # Most users who bought something should register some discount activity, since the
+    # simulator applies a non-zero discount to the majority of listings.
+    nonzero_share = float((discount > 0).mean())
+    assert nonzero_share > 0.5, (
+        f"only {nonzero_share:.1%} of purchasers show any discount, so the feature is "
+        "likely being computed against a mismatched price baseline"
+    )
+    assert discount.max() > 5.0, "no purchaser registers a meaningful discount"
+
+
+def test_product_average_price_is_currency_normalized():
+    """
+    Verifies dim_products.avg_price agrees with currency-normalized event prices.
+
+    This is the root cause behind the dead discount features. The column was once
+    computed as a plain AVG(price) over a mix of INR and USD listings, understating
+    every product's true average by 1.6x to 2.0x. Because the behavioral feature layer
+    compares a normalized price against this column, that mismatch silently suppressed
+    the discount signal while every individual value still looked plausible.
+    """
+    db_path = Path("data/processed/consumer.duckdb")
+    if not db_path.exists():
+        pytest.skip("Warehouse database not available")
+
+    from src.config import USD_TO_INR_RATE
+
+    with duckdb.connect(str(db_path), read_only=True) as con:
+        rows = con.execute(
+            f"""
+            SELECT
+                p.canonical_product_id,
+                CAST(p.avg_price AS DOUBLE) AS stored_avg,
+                AVG(
+                    CASE WHEN e.currency = 'USD'
+                         THEN e.price * {USD_TO_INR_RATE}
+                         ELSE e.price END
+                ) AS normalized_avg
+            FROM dim_products p
+            JOIN fact_events e USING (canonical_product_id)
+            GROUP BY 1, 2
+            """
+        ).fetchall()
+
+    assert rows, "No products joined to events"
+
+    for product_id, stored, normalized in rows:
+        assert stored == pytest.approx(normalized, rel=0.01), (
+            f"{product_id}: dim_products.avg_price is {stored:,.0f} but the "
+            f"currency-normalized average is {normalized:,.0f}. The aggregation is "
+            "mixing INR and USD."
+        )
