@@ -1,0 +1,266 @@
+{
+  "horizon_days": 30,
+  "penalizer_coef": 0.001,
+  "n_customers": 306,
+  "n_repeat_customers": 255,
+  "n_transactions": 2208,
+  "frequency_monetary_correlation": 0.04570865520888174,
+  "bgnbd_params": {
+    "r": 1.638894108521329,
+    "alpha": 7.773538289831996,
+    "a": 0.0686070698570943,
+    "b": 1.0686841053037284
+  },
+  "gamma_gamma_params": {
+    "p": 9.862339786933246,
+    "q": 0.203846240922948,
+    "v": 9.78242358987298
+  },
+  "gamma_gamma_q_below_one": true,
+  "order_value_fallback_count": 51,
+  "purchase_fallback_count": 0,
+  "total_predicted_clv": 44770254.81307495,
+  "mean_predicted_clv": 146308.0222649508,
+  "median_predicted_clv": 88191.37236423262,
+  "top_users": [
+    {
+      "user_id": "user_101",
+      "frequency": 10.0,
+      "predicted_purchases": 10.22246321444567,
+      "predicted_avg_order_value": 108883.5739771181,
+      "predicted_clv": 1113058.3296384634,
+      "probability_alive": 0.9860183902249509,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "loyalist"
+    },
+    {
+      "user_id": "user_316",
+      "frequency": 12.0,
+      "predicted_purchases": 10.768193204395251,
+      "predicted_avg_order_value": 100391.64036051925,
+      "predicted_clv": 1081036.5795082354,
+      "probability_alive": 0.991788291574341,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "loyalist"
+    },
+    {
+      "user_id": "user_181",
+      "frequency": 23.0,
+      "predicted_purchases": 19.57437012726731,
+      "predicted_avg_order_value": 47455.968011222016,
+      "predicted_clv": 928920.6825994174,
+      "probability_alive": 0.9970347838328304,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "loyalist"
+    },
+    {
+      "user_id": "user_239",
+      "frequency": 10.0,
+      "predicted_purchases": 9.451000213672717,
+      "predicted_avg_order_value": 92758.55205957925,
+      "predicted_clv": 876661.0953350554,
+      "probability_alive": 0.9932322088147965,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "impulse_buyer"
+    },
+    {
+      "user_id": "user_156",
+      "frequency": 9.0,
+      "predicted_purchases": 10.294519213409245,
+      "predicted_avg_order_value": 76211.12803430155,
+      "predicted_clv": 784556.9218247093,
+      "probability_alive": 0.9892359510797994,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "loyalist"
+    },
+    {
+      "user_id": "user_096",
+      "frequency": 6.0,
+      "predicted_purchases": 6.270737500953328,
+      "predicted_avg_order_value": 112979.40542792866,
+      "predicted_clv": 708464.1944523223,
+      "probability_alive": 0.9779748374005676,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "loyalist"
+    },
+    {
+      "user_id": "user_261",
+      "frequency": 7.0,
+      "predicted_purchases": 7.591398167987979,
+      "predicted_avg_order_value": 89753.4541537652,
+      "predicted_clv": 681354.2074334861,
+      "probability_alive": 0.9874738962353062,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "loyalist"
+    },
+    {
+      "user_id": "user_353",
+      "frequency": 10.0,
+      "predicted_purchases": 9.652294367485728,
+      "predicted_avg_order_value": 68435.60603816716,
+      "predicted_clv": 660560.6146976731,
+      "probability_alive": 0.9866045822160329,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "bargain_hunter"
+    },
+    {
+      "user_id": "user_119",
+      "frequency": 10.0,
+      "predicted_purchases": 9.426060439874234,
+      "predicted_avg_order_value": 63346.47316784751,
+      "predicted_clv": 597107.6847330021,
+      "probability_alive": 0.9906112178025043,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "impulse_buyer"
+    },
+    {
+      "user_id": "user_356",
+      "frequency": 19.0,
+      "predicted_purchases": 16.382687873598506,
+      "predicted_avg_order_value": 35629.49117228354,
+      "predicted_clv": 583706.8329706546,
+      "probability_alive": 0.996415006218532,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "loyalist"
+    }
+  ],
+  "bottom_users": [
+    {
+      "user_id": "user_123",
+      "frequency": 1.0,
+      "predicted_purchases": 1.8126927157726906,
+      "predicted_avg_order_value": 929.1386872713464,
+      "predicted_clv": 1684.2429303593697,
+      "probability_alive": 0.7102291528694383,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "bargain_hunter"
+    },
+    {
+      "user_id": "user_364",
+      "frequency": 0.0,
+      "predicted_purchases": 1.347965559632872,
+      "predicted_avg_order_value": 1099.0,
+      "predicted_clv": 1481.4141500365263,
+      "probability_alive": 1.0,
+      "order_value_estimate_source": "observed",
+      "archetype": "impulse_buyer"
+    },
+    {
+      "user_id": "user_138",
+      "frequency": 1.0,
+      "predicted_purchases": 1.400444241863935,
+      "predicted_avg_order_value": 1026.824539971197,
+      "predicted_clv": 1438.0105144072468,
+      "probability_alive": 0.5844514187036745,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "bargain_hunter"
+    },
+    {
+      "user_id": "user_009",
+      "frequency": 0.0,
+      "predicted_purchases": 2.114377000328277,
+      "predicted_avg_order_value": 649.5,
+      "predicted_clv": 1373.287861713216,
+      "probability_alive": 1.0,
+      "order_value_estimate_source": "observed",
+      "archetype": "impulse_buyer"
+    },
+    {
+      "user_id": "user_099",
+      "frequency": 1.0,
+      "predicted_purchases": 0.6664522410097339,
+      "predicted_avg_order_value": 2042.1373530826197,
+      "predicted_clv": 1360.9870154115981,
+      "probability_alive": 0.32060111390596335,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "impulse_buyer"
+    },
+    {
+      "user_id": "user_383",
+      "frequency": 0.0,
+      "predicted_purchases": 1.8682610242011408,
+      "predicted_avg_order_value": 714.35,
+      "predicted_clv": 1334.592262638085,
+      "probability_alive": 1.0,
+      "order_value_estimate_source": "observed",
+      "archetype": "bargain_hunter"
+    },
+    {
+      "user_id": "user_173",
+      "frequency": 1.0,
+      "predicted_purchases": 1.119417074400584,
+      "predicted_avg_order_value": 929.1386872713464,
+      "predicted_clv": 1040.0937110176897,
+      "probability_alive": 0.5385027446744531,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "bargain_hunter"
+    },
+    {
+      "user_id": "user_281",
+      "frequency": 1.0,
+      "predicted_purchases": 0.9681326208602208,
+      "predicted_avg_order_value": 825.9593651267935,
+      "predicted_clv": 799.6382048842466,
+      "probability_alive": 0.4533962487499487,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "loyalist"
+    },
+    {
+      "user_id": "user_288",
+      "frequency": 1.0,
+      "predicted_purchases": 0.8385679258988283,
+      "predicted_avg_order_value": 912.6256444652913,
+      "predicted_clv": 765.2985938013409,
+      "probability_alive": 0.37134795639314927,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "bargain_hunter"
+    },
+    {
+      "user_id": "user_376",
+      "frequency": 1.0,
+      "predicted_purchases": 0.544534473936055,
+      "predicted_avg_order_value": 1070.554732382489,
+      "predicted_clv": 582.9539580176528,
+      "probability_alive": 0.261951792133815,
+      "order_value_estimate_source": "gamma_gamma",
+      "archetype": "loyalist"
+    }
+  ],
+  "archetype_summary": [
+    {
+      "archetype": "loyalist",
+      "users": 79,
+      "mean_predicted_clv": 251463.200739905,
+      "mean_predicted_purchases": 7.592214618249901,
+      "mean_probability_alive": 0.8888347675626943
+    },
+    {
+      "archetype": "impulse_buyer",
+      "users": 80,
+      "mean_predicted_clv": 148348.27986272826,
+      "mean_predicted_purchases": 5.289616177620195,
+      "mean_probability_alive": 0.8771079848191222
+    },
+    {
+      "archetype": "bargain_hunter",
+      "users": 79,
+      "mean_predicted_clv": 105737.08906329566,
+      "mean_predicted_purchases": 5.141659963066508,
+      "mean_probability_alive": 0.8746590815833704
+    },
+    {
+      "archetype": "comparison_shopper",
+      "users": 48,
+      "mean_predicted_clv": 69849.32005987309,
+      "mean_predicted_purchases": 2.7364879289490176,
+      "mean_probability_alive": 0.8967090458747116
+    },
+    {
+      "archetype": "window_shopper",
+      "users": 20,
+      "mean_predicted_clv": 66540.10833649561,
+      "mean_predicted_purchases": 2.381006244955535,
+      "mean_probability_alive": 0.952548110595602
+    }
+  ]
+}
