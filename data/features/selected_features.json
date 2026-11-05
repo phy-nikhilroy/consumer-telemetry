@@ -4,50 +4,51 @@
   "selected_features": [
     "view_to_cart_ratio",
     "days_since_last_event",
+    "days_since_last_cart_add",
     "total_spend_30d",
     "total_purchases_30d",
-    "days_since_last_cart_add",
     "total_purchases_7d",
     "total_sessions_7d",
-    "total_events_7d",
-    "dominant_app_share",
-    "max_single_purchase",
-    "total_spend_7d",
     "weekend_event_share",
-    "avg_session_duration_minutes",
+    "dominant_app_share",
+    "total_spend_7d",
+    "max_single_purchase",
     "avg_order_value",
+    "total_events_7d",
+    "avg_session_duration_minutes",
     "total_sessions_30d",
-    "avg_time_between_sessions_hours",
     "cross_app_comparison_count",
-    "cart_to_purchase_ratio"
+    "evening_event_share",
+    "avg_time_between_sessions_hours"
   ],
   "pruned_collinear_features": [
-    "avg_events_per_session",
-    "total_spend_lifetime",
     "total_events_30d",
+    "avg_events_per_session",
     "total_events_lifetime",
-    "app_entropy"
+    "total_spend_lifetime",
+    "app_entropy",
+    "pct_purchases_with_discount"
   ],
   "top_predictive_features": [
     {
       "feature": "view_to_cart_ratio",
-      "importance": 0.0919
+      "importance": 0.0904
     },
     {
       "feature": "days_since_last_event",
-      "importance": 0.0723
-    },
-    {
-      "feature": "total_spend_30d",
-      "importance": 0.0606
-    },
-    {
-      "feature": "total_purchases_30d",
-      "importance": 0.0591
+      "importance": 0.0646
     },
     {
       "feature": "days_since_last_cart_add",
-      "importance": 0.0579
+      "importance": 0.0637
+    },
+    {
+      "feature": "total_spend_30d",
+      "importance": 0.0598
+    },
+    {
+      "feature": "total_purchases_30d",
+      "importance": 0.0576
     }
   ],
   "target_variables": [

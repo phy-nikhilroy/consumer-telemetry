@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import duckdb
 import polars as pl
 
-from src.config import DEFAULT_DB_PATH, PROCESSED_DATA_DIR
+from src.config import DEFAULT_DB_PATH, PROCESSED_DATA_DIR, USD_TO_INR_RATE
 from src.features.database import DatabaseManager
 
 DEFAULT_PARQUET_PATH = PROCESSED_DATA_DIR / "extracted_products.parquet"
@@ -90,7 +90,7 @@ def load_telemetry_to_warehouse(
         """)
 
         # 2. Populate dim_products
-        con.execute("""
+        con.execute(f"""
             INSERT OR REPLACE INTO dim_products (
                 canonical_product_id,
                 brand,
@@ -105,7 +105,15 @@ def load_telemetry_to_warehouse(
                 FIRST(canonical_name) FILTER (WHERE canonical_name IS NOT NULL) AS product_title,
                 FIRST(category_l1) FILTER (WHERE category_l1 IS NOT NULL) AS category_l1,
                 FIRST(category_l2) FILTER (WHERE category_l2 IS NOT NULL) AS category_l2,
-                CAST(AVG(price) AS DECIMAL(10,2)) AS avg_price
+                -- Normalize currency before averaging. Averaging raw prices across a
+                -- mix of INR and USD listings understates the true average by a factor
+                -- of roughly two, and because the behavioral feature layer compares a
+                -- currency-normalized price against this column, an unnormalized value
+                -- made almost every purchase look like it was above average price,
+                -- silently zeroing out the discount features for 96 percent of users.
+                CAST(AVG(
+                    CASE WHEN currency = 'USD' THEN price * {USD_TO_INR_RATE} ELSE price END
+                ) AS DECIMAL(12,2)) AS avg_price
             FROM raw_events_view
             WHERE canonical_product_id IS NOT NULL
             GROUP BY canonical_product_id

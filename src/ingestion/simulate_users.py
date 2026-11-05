@@ -31,6 +31,7 @@ import polars as pl
 
 from src.features.database import DatabaseManager, DEFAULT_DB_PATH
 from src.ingestion.pipeline import process
+from src.config import USD_TO_INR_RATE
 from src.ingestion.synthetic_data import CATALOG, _format_inr
 
 # 5 User Behavioral Archetypes
@@ -514,7 +515,7 @@ def reload_duckdb_warehouse(
         """)
 
         # 2. Insert dim_products
-        con.execute("""
+        con.execute(f"""
             INSERT INTO dim_products (
                 canonical_product_id,
                 brand,
@@ -529,7 +530,15 @@ def reload_duckdb_warehouse(
                 FIRST(canonical_name) FILTER (WHERE canonical_name IS NOT NULL) AS product_title,
                 FIRST(category_l1) FILTER (WHERE category_l1 IS NOT NULL) AS category_l1,
                 FIRST(category_l2) FILTER (WHERE category_l2 IS NOT NULL) AS category_l2,
-                CAST(AVG(price) AS DECIMAL(10,2)) AS avg_price
+                -- Normalize currency before averaging. Averaging raw prices across a
+                -- mix of INR and USD listings understates the true average by a factor
+                -- of roughly two, and because the behavioral feature layer compares a
+                -- currency-normalized price against this column, an unnormalized value
+                -- made almost every purchase look like it was above average price,
+                -- silently zeroing out the discount features for 96 percent of users.
+                CAST(AVG(
+                    CASE WHEN currency = 'USD' THEN price * {USD_TO_INR_RATE} ELSE price END
+                ) AS DECIMAL(12,2)) AS avg_price
             FROM expanded_events_view
             WHERE canonical_product_id IS NOT NULL
             GROUP BY canonical_product_id

@@ -5,35 +5,35 @@
     "best_method": "sigmoid",
     "cv_scores": {
       "uncalibrated": {
-        "brier_score": 0.1405319066834209,
-        "log_loss": 0.4465692071452206,
-        "roc_auc": 0.8684433707691912
+        "brier_score": 0.14041307629454752,
+        "log_loss": 0.4460875750939043,
+        "roc_auc": 0.8686232684844903
       },
       "isotonic": {
-        "brier_score": 0.13933957773907046,
-        "log_loss": 0.6177173972026402,
-        "roc_auc": 0.8721955231168564
+        "brier_score": 0.1399446686454494,
+        "log_loss": 0.5461098656165128,
+        "roc_auc": 0.8663102978592172
       },
       "sigmoid": {
-        "brier_score": 0.13759996186134146,
-        "log_loss": 0.43808446973925624,
-        "roc_auc": 0.8727866156099817
+        "brier_score": 0.13818011143542097,
+        "log_loss": 0.43952403700102743,
+        "roc_auc": 0.8720670247487856
       }
     },
     "improves_on_uncalibrated": true
   },
   "test_metrics_uncalibrated": {
-    "brier_score": 0.11564957863471045,
-    "log_loss": 0.37333007029902127,
-    "roc_auc": 0.9144785019353489,
-    "mean_predicted": 0.44011757247529737,
+    "brier_score": 0.1162240557397418,
+    "log_loss": 0.37212911683295646,
+    "roc_auc": 0.9118370122397741,
+    "mean_predicted": 0.4336751916140586,
     "observed_rate": 0.395
   },
   "test_metrics_calibrated": {
-    "brier_score": 0.11003451023789995,
-    "log_loss": 0.3593796694474228,
-    "roc_auc": 0.9227429647452663,
-    "mean_predicted": 0.40908268157741534,
+    "brier_score": 0.10934388335497705,
+    "log_loss": 0.3562173050864139,
+    "roc_auc": 0.9242337064546501,
+    "mean_predicted": 0.4086875461071136,
     "observed_rate": 0.395
   },
   "top_decile_lift": 2.531645569620253,
@@ -44,7 +44,7 @@
     {
       "decile": 1,
       "users": 40,
-      "mean_predicted_probability": 0.879118187788739,
+      "mean_predicted_probability": 0.8824970968204122,
       "actual_purchasers": 40,
       "actual_purchase_rate": 1.0,
       "lift": 2.531645569620253,
@@ -54,7 +54,7 @@
     {
       "decile": 2,
       "users": 40,
-      "mean_predicted_probability": 0.8197891420583142,
+      "mean_predicted_probability": 0.8252099721687308,
       "actual_purchasers": 34,
       "actual_purchase_rate": 0.85,
       "lift": 2.151898734177215,
@@ -64,7 +64,7 @@
     {
       "decile": 3,
       "users": 40,
-      "mean_predicted_probability": 0.7438084108898851,
+      "mean_predicted_probability": 0.7455106746284981,
       "actual_purchasers": 28,
       "actual_purchase_rate": 0.7,
       "lift": 1.7721518987341771,
@@ -74,27 +74,27 @@
     {
       "decile": 4,
       "users": 40,
-      "mean_predicted_probability": 0.6393644417523555,
-      "actual_purchasers": 28,
-      "actual_purchase_rate": 0.7,
-      "lift": 1.7721518987341771,
+      "mean_predicted_probability": 0.6406271997852084,
+      "actual_purchasers": 27,
+      "actual_purchase_rate": 0.675,
+      "lift": 1.7088607594936709,
       "cumulative_users_pct": 0.4,
-      "cumulative_capture_pct": 0.8227848101265823
+      "cumulative_capture_pct": 0.8164556962025317
     },
     {
       "decile": 5,
       "users": 40,
-      "mean_predicted_probability": 0.4428467148908565,
-      "actual_purchasers": 16,
-      "actual_purchase_rate": 0.4,
-      "lift": 1.0126582278481013,
+      "mean_predicted_probability": 0.4414724208924641,
+      "actual_purchasers": 17,
+      "actual_purchase_rate": 0.425,
+      "lift": 1.0759493670886076,
       "cumulative_users_pct": 0.5,
       "cumulative_capture_pct": 0.9240506329113924
     },
     {
       "decile": 6,
       "users": 40,
-      "mean_predicted_probability": 0.21418491985349788,
+      "mean_predicted_probability": 0.2109993415171214,
       "actual_purchasers": 5,
       "actual_purchase_rate": 0.125,
       "lift": 0.3164556962025316,
@@ -104,7 +104,7 @@
     {
       "decile": 7,
       "users": 40,
-      "mean_predicted_probability": 0.14717848365340017,
+      "mean_predicted_probability": 0.14077945667211383,
       "actual_purchasers": 4,
       "actual_purchase_rate": 0.1,
       "lift": 0.25316455696202533,
@@ -114,7 +114,7 @@
     {
       "decile": 8,
       "users": 40,
-      "mean_predicted_probability": 0.09883477466935153,
+      "mean_predicted_probability": 0.09817078940236668,
       "actual_purchasers": 3,
       "actual_purchase_rate": 0.075,
       "lift": 0.18987341772151897,
@@ -124,7 +124,7 @@
     {
       "decile": 9,
       "users": 40,
-      "mean_predicted_probability": 0.06262040649249692,
+      "mean_predicted_probability": 0.060913820602077985,
       "actual_purchasers": 0,
       "actual_purchase_rate": 0.0,
       "lift": 0.0,
@@ -134,7 +134,7 @@
     {
       "decile": 10,
       "users": 40,
-      "mean_predicted_probability": 0.043081333725255924,
+      "mean_predicted_probability": 0.04069468858214205,
       "actual_purchasers": 0,
       "actual_purchase_rate": 0.0,
       "lift": 0.0,
