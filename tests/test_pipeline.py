@@ -45,3 +45,74 @@ def test_run_pipeline_end_to_end(tmp_path):
     assert "price" in df.columns
     assert df["brand"][0] == "boAt"
     assert df["action"][0] == "cart"
+
+
+from src.ingestion.ner_extractor import BRAND_SOURCE_LEADING_MATCH, BRAND_SOURCE_MATCH
+from src.ingestion.pipeline import calculate_extraction_confidence, category_evidence
+from src.ingestion.synthetic_data import CATALOG
+
+
+@pytest.mark.parametrize("item", CATALOG, ids=lambda item: f"{item['brand']} {item['title']}")
+def test_catalog_products_keep_brand_and_category(item):
+    """
+    Verifies every synthetic catalog product still resolves to its brand and a real
+    category under the open-vocabulary brand path and the taxonomy abstain floor.
+
+    The simulator derives warehouse products from exactly this call, so an abstention
+    here would silently change the synthetic warehouse.
+    """
+    text = f"{item['brand']} {item['title']} {' '.join(item.get('specs', []))} $99.99 4.5★ Add to Cart"
+    prod = process(text)
+    assert prod.brand == item["brand"]
+    assert prod.category_l2 != "Unknown"
+
+
+def test_confidence_reflects_evidence_not_population():
+    """
+    Verifies two records with the same populated fields score differently when the
+    evidence behind them differs.
+
+    The previous score counted populated fields, so it averaged 0.90 on real listings
+    whose brand was right 1 percent of the time.
+    """
+    base = {
+        "brand": "Samsung",
+        "product_title": "Galaxy S6 Case",
+        "price": 9.99,
+        "price_verified": True,
+        "currency": "USD",
+        "rating": 4.2,
+        "category_l2": "Smartphones",
+        "category_similarity": 0.40,
+    }
+    strong = calculate_extraction_confidence({**base, "brand_source": BRAND_SOURCE_LEADING_MATCH})
+    weak = calculate_extraction_confidence({**base, "brand_source": BRAND_SOURCE_MATCH})
+    assert strong > weak
+
+    abstained = calculate_extraction_confidence(
+        {**base, "brand_source": BRAND_SOURCE_LEADING_MATCH, "category_l2": "Unknown",
+         "category_abstained": True}
+    )
+    assert abstained < strong
+
+    unverified = calculate_extraction_confidence(
+        {**base, "brand_source": BRAND_SOURCE_LEADING_MATCH, "price_verified": False}
+    )
+    assert unverified < strong
+
+
+def test_category_evidence_is_zero_at_floor_and_capped_at_one():
+    """Verifies category evidence rises from zero at the floor to one."""
+    assert category_evidence(0.9, abstained=True) == 0.0
+    assert category_evidence(0.0, abstained=False) == 0.0
+    assert category_evidence(0.99, abstained=False) == 1.0
+    assert 0.0 < category_evidence(0.30, abstained=False) < 1.0
+
+
+def test_accessory_listing_scores_below_clean_listing():
+    """Verifies an accessory listing with a compatibility brand mention scores lower."""
+    clean = process("Sponsored 4.7 out of 5 stars Apple iPhone 15 (128 GB) ₹68,330 FREE delivery Buy Now")
+    accessory = process("4.1★ (88) Case for Samsung Galaxy S6 Slim Translucent Mirror Flip $9.99 Add to Cart")
+    assert accessory.brand != "Samsung"
+    assert accessory.extraction_confidence < clean.extraction_confidence
+    assert clean.brand_source == BRAND_SOURCE_LEADING_MATCH

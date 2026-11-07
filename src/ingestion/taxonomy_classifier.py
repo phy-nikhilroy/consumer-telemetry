@@ -1,3 +1,14 @@
+"""
+Semantic product taxonomy classification with sentence-transformer embeddings and FAISS.
+
+The label set is closed, so nearest-neighbour search alone always returns some category
+however unrelated the product is. A similarity floor gives the classifier an abstain
+path: below it the product is labelled Unknown, turning a silent misclassification into
+a visible gap.
+"""
+
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
@@ -5,6 +16,8 @@ from typing import Any, Dict, List, Optional
 import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
+
+from src.config import TAXONOMY_MIN_SIMILARITY
 
 # Mapping from representative taxonomy descriptions to structured L1/L2 and full hierarchy
 # Aligned with Google Product Taxonomy standards and e-commerce categories
@@ -118,32 +131,63 @@ class TaxonomyClassifier:
         with open(self.metadata_path, "w") as f:
             json.dump({"records": self.records}, f, indent=2)
 
-    def classify_product(self, product_title: str, brand: Optional[str] = None) -> Dict[str, Any]:
+    def classify_product(
+        self,
+        product_title: str,
+        brand: Optional[str] = None,
+        min_similarity: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """
-        Classifies product into standard taxonomy categories.
+        Classifies a product into the taxonomy, abstaining when no category is close.
+
+        Returns the category fields plus `confidence` (cosine similarity to the best
+        category), `margin` (how far the best category leads the runner-up), and
+        `abstained`. When the best similarity is below `min_similarity` the category
+        fields are "Unknown" and `nearest_category` records what would have been chosen.
         """
+        floor = TAXONOMY_MIN_SIMILARITY if min_similarity is None else float(min_similarity)
+
         if not product_title and not brand:
             return {
                 "category_l1": "Unknown",
                 "category_l2": "Unknown",
                 "full_category": "Unknown",
-                "confidence": 0.0
+                "confidence": 0.0,
+                "margin": 0.0,
+                "abstained": True,
+                "nearest_category": None,
             }
 
         query = f"{brand} {product_title}".strip() if brand else product_title.strip()
         query_vector = self.model.encode([query], convert_to_numpy=True, normalize_embeddings=True).astype(np.float32)
 
-        distances, indices = self.index.search(query_vector, 1)
+        k = min(2, len(self.records))
+        distances, indices = self.index.search(query_vector, k)
 
         best_idx = int(indices[0][0])
         confidence = float(distances[0][0])
+        margin = float(distances[0][0] - distances[0][1]) if k > 1 else confidence
         matched_rec = self.records[best_idx]
+
+        if confidence < floor:
+            return {
+                "category_l1": "Unknown",
+                "category_l2": "Unknown",
+                "full_category": "Unknown",
+                "confidence": round(confidence, 4),
+                "margin": round(margin, 4),
+                "abstained": True,
+                "nearest_category": matched_rec["full_category"],
+            }
 
         return {
             "category_l1": matched_rec["category_l1"],
             "category_l2": matched_rec["category_l2"],
             "full_category": matched_rec["full_category"],
-            "confidence": round(confidence, 4)
+            "confidence": round(confidence, 4),
+            "margin": round(margin, 4),
+            "abstained": False,
+            "nearest_category": matched_rec["full_category"],
         }
 
 
@@ -151,7 +195,11 @@ class TaxonomyClassifier:
 _classifier_instance: Optional[TaxonomyClassifier] = None
 
 
-def classify_product(product_title: str, brand: Optional[str] = None) -> Dict[str, Any]:
+def classify_product(
+    product_title: str,
+    brand: Optional[str] = None,
+    min_similarity: Optional[float] = None,
+) -> Dict[str, Any]:
     """
     Classifies a product using a lazily constructed shared classifier.
 
@@ -161,4 +209,4 @@ def classify_product(product_title: str, brand: Optional[str] = None) -> Dict[st
     global _classifier_instance
     if _classifier_instance is None:
         _classifier_instance = TaxonomyClassifier()
-    return _classifier_instance.classify_product(product_title, brand)
+    return _classifier_instance.classify_product(product_title, brand, min_similarity=min_similarity)

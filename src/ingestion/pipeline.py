@@ -1,3 +1,13 @@
+"""
+Upstream ingestion pipeline: raw screen text to a validated, resolved product record.
+
+Wires the regex extractors, the linguistic brand and title extractors, the taxonomy
+classifier, and the entity resolver into `process()`, and scores how far each record can
+be trusted with `calculate_extraction_confidence()`.
+"""
+
+from __future__ import annotations
+
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -6,7 +16,16 @@ import polars as pl
 from pydantic import BaseModel, Field, field_validator
 
 from src.ingestion.regex_extractor import extract_price, extract_rating, extract_action
-from src.ingestion.ner_extractor import extract_brand, extract_product_title, extract_specs
+from src.config import TAXONOMY_CONFIDENT_SIMILARITY, TAXONOMY_MIN_SIMILARITY
+from src.ingestion.ner_extractor import (
+    BRAND_SOURCE_LEADING_MATCH,
+    BRAND_SOURCE_LEADING_TOKEN,
+    BRAND_SOURCE_MATCH,
+    extract_brand_with_source,
+    extract_price_mentions,
+    extract_product_title,
+    extract_specs,
+)
 from src.ingestion.taxonomy_classifier import classify_product
 from src.ingestion.entity_resolver import compute_canonical_key, compute_canonical_name
 
@@ -29,6 +48,9 @@ class ExtractedProduct(BaseModel):
     rating: Optional[float] = None
     num_ratings: Optional[int] = None
     action: str = "view"
+    brand_source: Optional[str] = None
+    category_similarity: float = 0.0
+    price_verified: bool = False
     extraction_confidence: float = 0.0
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -40,32 +62,89 @@ class ExtractedProduct(BaseModel):
         return v if v in valid_actions else "view"
 
 
+# How much each field contributes to the overall confidence score.
+CONFIDENCE_WEIGHTS: Dict[str, float] = {
+    "brand": 0.25,
+    "category": 0.25,
+    "price": 0.25,
+    "product_title": 0.15,
+    "currency": 0.05,
+    "rating": 0.05,
+}
+
+# How far each kind of brand evidence can be trusted. The values follow the precision
+# each source achieved on real out-of-domain listings (week_3_real_data_validation.md):
+# a known brand leading the title is right most of the time, the leading-word fallback
+# somewhat less, and a known brand found only mid-title is usually the device an
+# accessory fits rather than its maker.
+BRAND_EVIDENCE: Dict[Optional[str], float] = {
+    BRAND_SOURCE_LEADING_MATCH: 0.9,
+    BRAND_SOURCE_LEADING_TOKEN: 0.7,
+    BRAND_SOURCE_MATCH: 0.2,
+    None: 0.0,
+}
+
+# A regex price that spaCy's statistical NER also recognizes as money counts fully; a
+# regex price with no independent confirmation counts for less.
+PRICE_VERIFIED_EVIDENCE = 1.0
+PRICE_UNVERIFIED_EVIDENCE = 0.7
+
+
+def category_evidence(similarity: float, abstained: bool) -> float:
+    """
+    Maps taxonomy similarity onto [0, 1]: zero at or below the abstain floor, rising
+    linearly to one at `TAXONOMY_CONFIDENT_SIMILARITY`.
+    """
+    if abstained:
+        return 0.0
+    span = TAXONOMY_CONFIDENT_SIMILARITY - TAXONOMY_MIN_SIMILARITY
+    if span <= 0:
+        return 1.0
+    return float(min(1.0, max(0.0, (similarity - TAXONOMY_MIN_SIMILARITY) / span)))
+
+
+def price_is_verified(price: Optional[float], ner_amounts: List[float]) -> bool:
+    """Returns whether an independent NER money mention agrees with the regex price."""
+    if price is None:
+        return False
+    return any(abs(amount - float(price)) < 0.01 for amount in ner_amounts)
+
+
 def calculate_extraction_confidence(extracted: Dict[str, Any]) -> float:
     """
-    Computes a normalized confidence score (0.0 to 1.0) based on extraction coverage.
-    """
-    weights = {
-        "brand": 0.20,
-        "product_title": 0.25,
-        "price": 0.25,
-        "currency": 0.10,
-        "rating": 0.10,
-        "category": 0.10,
-    }
+    Scores how far an extracted record can be trusted, from 0.0 to 1.0.
 
+    Each field contributes its weight multiplied by the strength of the evidence behind
+    it, not merely whether it is populated. The previous score counted populated fields,
+    so a brand that was confidently wrong scored exactly like a correct one; on real
+    listings it averaged 0.90 while brand accuracy was 1 percent.
+
+    Recognized keys: `brand`, `brand_source`, `product_title`, `price`,
+    `price_verified`, `currency`, `rating`, `category_l2`, `category_similarity`,
+    and `category_abstained`.
+    """
     score = 0.0
+
     if extracted.get("brand"):
-        score += weights["brand"]
+        score += CONFIDENCE_WEIGHTS["brand"] * BRAND_EVIDENCE.get(extracted.get("brand_source"), 0.0)
+
     if extracted.get("product_title"):
-        score += weights["product_title"]
+        score += CONFIDENCE_WEIGHTS["product_title"]
+
     if extracted.get("price") is not None:
-        score += weights["price"]
-    if extracted.get("currency"):
-        score += weights["currency"]
+        evidence = PRICE_VERIFIED_EVIDENCE if extracted.get("price_verified") else PRICE_UNVERIFIED_EVIDENCE
+        score += CONFIDENCE_WEIGHTS["price"] * evidence
+        if extracted.get("currency"):
+            score += CONFIDENCE_WEIGHTS["currency"]
+
     if extracted.get("rating") is not None:
-        score += weights["rating"]
-    if extracted.get("category_l2") and extracted.get("category_l2") != "Unknown":
-        score += weights["category"]
+        score += CONFIDENCE_WEIGHTS["rating"]
+
+    category = extracted.get("category_l2")
+    abstained = bool(extracted.get("category_abstained")) or not category or category == "Unknown"
+    score += CONFIDENCE_WEIGHTS["category"] * category_evidence(
+        float(extracted.get("category_similarity") or 0.0), abstained
+    )
 
     return round(score, 4)
 
@@ -85,9 +164,10 @@ def process(
     action = extract_action(raw_text)
 
     # 2. Linguistic NER extraction
-    brand = extract_brand(raw_text)
+    brand, brand_source = extract_brand_with_source(raw_text)
     product_title = extract_product_title(raw_text, brand=brand)
     specs = extract_specs(raw_text)
+    price_verified = price_is_verified(price_info.get("price"), extract_price_mentions(raw_text))
 
     # 3. Semantic taxonomy classification
     taxonomy_info = classify_product(product_title or "", brand=brand)
@@ -97,13 +177,18 @@ def process(
     canonical_name = compute_canonical_name(brand, product_title)
 
     # 5. Extraction confidence
+    category_similarity = float(taxonomy_info.get("confidence", 0.0))
     extraction_data = {
         "brand": brand,
+        "brand_source": brand_source,
         "product_title": product_title,
         "price": price_info.get("price"),
+        "price_verified": price_verified,
         "currency": price_info.get("currency"),
         "rating": rating_info.get("rating"),
-        "category_l2": taxonomy_info.get("category_l2")
+        "category_l2": taxonomy_info.get("category_l2"),
+        "category_similarity": category_similarity,
+        "category_abstained": taxonomy_info.get("abstained", False),
     }
     confidence = calculate_extraction_confidence(extraction_data)
 
@@ -128,6 +213,9 @@ def process(
         rating=rating_info.get("rating"),
         num_ratings=rating_info.get("num_ratings"),
         action=action,
+        brand_source=brand_source,
+        category_similarity=category_similarity,
+        price_verified=price_verified,
         extraction_confidence=confidence,
         timestamp=timestamp
     )

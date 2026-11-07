@@ -41,6 +41,16 @@ CLV_GAMMAGAMMA_PATH = ARTIFACTS_DIR / "clv_gammagamma.joblib"
 USER_CLV_PATH = FEATURES_DIR / "user_clv.parquet"
 USER_SEGMENTS_PATH = FEATURES_DIR / "user_segments.parquet"
 
+# Taxonomy classification. A product whose best cosine similarity to every taxonomy
+# description falls below this floor is labelled Unknown instead of being forced into
+# the nearest category. Calibrated so every synthetic catalog product still classifies
+# (lowest catalog similarity 0.190) while out-of-taxonomy real listings, such as phone
+# cases that previously landed in Footwear, abstain. See week_3_real_data_validation.md.
+TAXONOMY_MIN_SIMILARITY = 0.16
+# Similarity at which a category assignment counts as fully confident when scoring
+# extraction confidence. Between the floor and this value confidence rises linearly.
+TAXONOMY_CONFIDENT_SIMILARITY = 0.45
+
 # Modeling parameters
 PRIMARY_TARGET = "will_purchase_next_7d"
 SWITCHING_TARGET = "will_switch_app_next_7d"
