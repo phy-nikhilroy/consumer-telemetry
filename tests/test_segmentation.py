@@ -10,13 +10,16 @@ import pytest
 
 from src.models.segmentation import (
     DEFAULT_K_VALUES,
+    MIN_SIGNATURE_COVERAGE,
     MIN_SIGNATURE_SIMILARITY,
     SEGMENT_SIGNATURES,
     SEGMENTATION_FEATURES,
     compute_cluster_zscores,
+    eligible_signatures,
     evaluate_k_range,
     fit_hdbscan,
     fit_kmeans,
+    k_at_range_boundary,
     load_segmentation_data,
     name_clusters,
     plot_cluster_profiles,
@@ -26,6 +29,8 @@ from src.models.segmentation import (
     scale_features,
     score_clustering,
     select_best_k,
+    signature_coverage,
+    split_live_features,
 )
 
 TRAIN_PATH = Path("data/features/train_features.parquet")
@@ -165,16 +170,49 @@ def test_profile_clusters_accounts_for_all_users(prepared):
         assert name in profile.columns
 
 
-def test_cluster_zscores_are_centered(prepared):
-    """Verifies z-scores express deviation from the cross-cluster mean."""
+def test_cluster_zscores_are_centered_on_the_user_population(prepared):
+    """
+    Verifies cluster z-scores are deviations from the user population, so their
+    user-weighted mean is zero for every feature.
+    """
     df, X, names, _ = prepared
     _, labels = fit_kmeans(X, n_clusters=5)
 
-    zscores = compute_cluster_zscores(profile_clusters(df, labels, names), names)
+    zscores = compute_cluster_zscores(X, labels, names)
     assert zscores.height == 5
+    assert zscores["users"].sum() == df.height
+    weights = np.array(zscores["users"].to_list(), dtype=float)
     for name in names:
         values = np.array(zscores[name].to_list(), dtype=float)
-        assert abs(float(values.mean())) < 1e-9
+        assert abs(float(np.average(values, weights=weights))) < 1e-9
+
+
+def test_tiny_extreme_cluster_does_not_invert_its_neighbours():
+    """
+    Verifies a heavy-buyer cluster reads as above average even beside a tiny cluster of
+    far more extreme buyers.
+
+    Equal-weighted z-scores across cluster means let a 6-user cluster averaging 117
+    purchases drag the reference point up, so a cluster of heavy buyers scored below
+    average and was named "Window Shoppers" on real data.
+    """
+    rng = np.random.default_rng(0)
+    names = ["total_events_30d", "total_purchases_30d", "total_spend_30d"]
+    bulk = rng.normal([5, 0.4, 100], [2, 0.3, 50], size=(500, 3))
+    heavy = rng.normal([460, 19, 4000], [20, 2, 300], size=(22, 3))
+    extreme = rng.normal([1300, 117, 30000], [50, 5, 1000], size=(6, 3))
+    raw = np.vstack([bulk, heavy, extreme])
+    labels = np.array([0] * 500 + [1] * 22 + [2] * 6)
+
+    X = (raw - raw.mean(axis=0)) / raw.std(axis=0)
+    zscores = compute_cluster_zscores(X, labels, names)
+    heavy_row = zscores.filter(pl.col("cluster") == 1).row(0, named=True)
+
+    assert heavy_row["total_purchases_30d"] > 0
+    assert heavy_row["total_spend_30d"] > 0
+
+    assigned = name_clusters(zscores, names)
+    assert assigned[1] != "Window Shoppers"
 
 
 def test_name_clusters_rejects_poor_matches():
@@ -234,7 +272,7 @@ def test_segmentation_plots_are_written(prepared, tmp_path):
     _, labels = fit_kmeans(X, n_clusters=4)
     _, hdb_labels = fit_hdbscan(X, min_cluster_size=15, n_components=5)
 
-    zscores = compute_cluster_zscores(profile_clusters(df, labels, names), names)
+    zscores = compute_cluster_zscores(X, labels, names)
     cluster_names = name_clusters(zscores, names)
 
     elbow = plot_elbow_and_silhouette(
@@ -253,3 +291,81 @@ def test_segmentation_plots_are_written(prepared, tmp_path):
 
     # Two components cannot retain more than all the variance.
     assert 0.0 < explained <= 1.0
+
+
+def test_split_live_features_drops_constant_columns():
+    """Verifies features with no variance are separated out before clustering."""
+    df = pl.DataFrame(
+        {
+            "user_id": ["a", "b", "c", "d"],
+            "total_events_30d": [1, 5, 9, 2],
+            "app_entropy": [0.0, 0.0, 0.0, 0.0],
+            "avg_discount_pct_on_purchases": [None, None, None, None],
+        }
+    )
+    live, dead = split_live_features(
+        df, ["total_events_30d", "app_entropy", "avg_discount_pct_on_purchases"]
+    )
+    assert live == ["total_events_30d"]
+    assert set(dead) == {"app_entropy", "avg_discount_pct_on_purchases"}
+
+
+def test_signature_needs_its_defining_features_to_be_named():
+    """
+    Verifies a signature whose defining features are dead cannot be assigned.
+
+    With both discount features constant, "Bargain Hunters" reduced to its single
+    leftover term, low average order value, and matched any cheap cluster perfectly.
+    """
+    live = [
+        name for name in SEGMENTATION_FEATURES
+        if name not in {"avg_discount_pct_on_purchases", "pct_purchases_with_discount",
+                        "app_entropy", "dominant_app_share", "cross_app_comparison_count"}
+    ]
+    coverage = eligible_signatures(live)
+    assert coverage["Bargain Hunters"] < MIN_SIGNATURE_COVERAGE
+    assert coverage["Single-App Regulars"] < MIN_SIGNATURE_COVERAGE
+    assert coverage["Comparison Shoppers"] < MIN_SIGNATURE_COVERAGE
+    assert coverage["Window Shoppers"] == pytest.approx(1.0)
+
+    row = {"cluster": 0, "users": 100}
+    for name in live:
+        row[name] = 0.0
+    row["avg_order_value"] = -2.0
+    assigned = name_clusters(pl.DataFrame([row]), live)
+    assert assigned[0] != "Bargain Hunters"
+
+
+def test_signature_coverage_bounds():
+    """Verifies coverage is one with every feature present and zero with none."""
+    weights = {"a": 1.0, "b": 1.0}
+    assert signature_coverage(weights, ["a", "b"]) == pytest.approx(1.0)
+    assert signature_coverage(weights, []) == 0.0
+    assert signature_coverage(weights, ["a"]) == pytest.approx(1 / np.sqrt(2))
+
+
+def test_k_at_range_boundary_flags_unresolved_selection():
+    """Verifies a k chosen at the top of the search range is reported as such."""
+    scores = pl.DataFrame({"k": [3, 4, 5, 6], "silhouette": [0.73, 0.74, 0.75, 0.76]})
+    assert k_at_range_boundary(scores, select_best_k(scores)) is True
+    peaked = pl.DataFrame({"k": [3, 4, 5, 6], "silhouette": [0.2, 0.3, 0.25, 0.22]})
+    assert k_at_range_boundary(peaked, select_best_k(peaked)) is False
+
+
+def test_never_purchasers_cluster_as_lapsed_not_as_recent():
+    """
+    Verifies a user who never purchased is scaled as the most lapsed user, not as one
+    who purchased today, and without the tree-model sentinel's extreme scale.
+    """
+    df = pl.DataFrame(
+        {
+            "user_id": ["a", "b", "c", "d"],
+            "days_since_last_purchase": [None, 0.5, 3.0, 9.0],
+            "total_events_30d": [10, 20, 30, 40],
+        }
+    )
+    X, names, _ = scale_features(df, ["days_since_last_purchase", "total_events_30d"])
+    recency = X[:, names.index("days_since_last_purchase")]
+    assert recency[0] == pytest.approx(recency[3])
+    assert recency[0] > recency[1]
+    assert float(np.abs(X).max()) < 3.0

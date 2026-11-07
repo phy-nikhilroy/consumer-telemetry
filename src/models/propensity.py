@@ -43,6 +43,7 @@ from src.config import (
     PRIMARY_TARGET,
     PROPENSITY_MODEL_PATH,
     RANDOM_SEED,
+    rebase_path,
 )
 from src.features.feature_store import get_modeling_matrices
 
@@ -245,15 +246,25 @@ def run_training_pipeline(
     plot_path: Optional[Union[str, Path]] = None,
     metrics_path: Optional[Union[str, Path]] = None,
     top_n_features: int = 15,
+    features_dir: Optional[Union[str, Path]] = None,
+    artifacts_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Trains, evaluates, and persists the purchase propensity model end to end.
 
+    `features_dir` and `artifacts_dir` redirect the inputs and outputs to another
+    dataset's directories, so a second run cannot overwrite the committed artifacts.
+    Explicit paths win over them.
+
     Returns a dictionary holding the fitted model, the train and test metric blocks,
     and the paths of every artifact written.
     """
-    X_train, y_train, feature_names = get_modeling_matrices(split="train", target_col=target_col)
-    X_test, y_test, test_feature_names = get_modeling_matrices(split="test", target_col=target_col)
+    X_train, y_train, feature_names = get_modeling_matrices(
+        split="train", target_col=target_col, features_dir=features_dir
+    )
+    X_test, y_test, test_feature_names = get_modeling_matrices(
+        split="test", target_col=target_col, features_dir=features_dir
+    )
 
     if feature_names != test_feature_names:
         raise ValueError("Train and test feature ordering differ; refusing to train.")
@@ -274,10 +285,15 @@ def run_training_pipeline(
     print_evaluation(train_metrics, "TRAIN")
     print_evaluation(test_metrics, "TEST")
 
-    saved_model = save_model(model, model_path)
-    saved_plot = plot_feature_importance(model, feature_names, top_n=top_n_features, output_path=plot_path)
+    saved_model = save_model(model, model_path or rebase_path(PROPENSITY_MODEL_PATH, artifacts_dir))
+    saved_plot = plot_feature_importance(
+        model,
+        feature_names,
+        top_n=top_n_features,
+        output_path=plot_path or rebase_path(FEATURE_IMPORTANCE_PLOT_PATH, artifacts_dir),
+    )
 
-    m_out = Path(metrics_path) if metrics_path else PROPENSITY_METRICS_PATH
+    m_out = Path(metrics_path) if metrics_path else rebase_path(PROPENSITY_METRICS_PATH, artifacts_dir)
     m_out.parent.mkdir(parents=True, exist_ok=True)
     serializable = {
         "target": target_col,
@@ -307,6 +323,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the LightGBM purchase propensity model.")
     parser.add_argument("--target", type=str, default=PRIMARY_TARGET, help="Binary target column")
     parser.add_argument("--top-n", type=int, default=15, help="Features shown in the importance plot")
+    parser.add_argument("--features-dir", type=str, default=None, help="Feature directory to read")
+    parser.add_argument("--artifacts-dir", type=str, default=None, help="Directory for model outputs")
     args = parser.parse_args()
 
-    run_training_pipeline(target_col=args.target, top_n_features=args.top_n)
+    run_training_pipeline(
+        target_col=args.target,
+        top_n_features=args.top_n,
+        features_dir=args.features_dir,
+        artifacts_dir=args.artifacts_dir,
+    )

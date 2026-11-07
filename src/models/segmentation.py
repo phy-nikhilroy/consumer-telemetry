@@ -11,6 +11,12 @@ outliers as noise instead of forcing them into a group.
 Clusters are profiled on interpretable behavioral features and then named by scoring
 each cluster against known shopper signatures, so the output is a readable segment
 rather than an anonymous cluster index.
+
+Naming is restricted to the feature space the data actually populates. Features with no
+variance are dropped before clustering, and a signature is only eligible when most of
+its weight sits on surviving features. On single-platform data, where every cross-app
+feature is constant, the unrestricted signatures produced labels that were the exact
+inverse of the clusters' behavior.
 """
 
 from __future__ import annotations
@@ -49,7 +55,9 @@ from src.config import (
     TRAIN_FEATURES_PATH,
     USER_CLV_PATH,
     USER_SEGMENTS_PATH,
+    rebase_path,
 )
+from src.features.feature_store import censored_recency_fill, fill_missing_features
 
 ELBOW_PLOT_PATH = ARTIFACTS_DIR / "segmentation_elbow_silhouette.png"
 PCA_PLOT_PATH = ARTIFACTS_DIR / "segmentation_pca_scatter.png"
@@ -118,11 +126,22 @@ SEGMENT_SIGNATURES: Dict[str, Dict[str, float]] = {
     },
 }
 
-# A cluster must resemble a signature at least this strongly to inherit its name.
-# Greedy assignment would otherwise hand the last unclaimed name to whichever cluster
-# was left over, which once labelled a low-entropy single-app cluster "Comparison
-# Shoppers", the exact opposite of its actual behavior.
-MIN_SIGNATURE_SIMILARITY = 0.15
+# A cluster must resemble a signature at least this strongly (cosine similarity) to
+# inherit its name. Greedy assignment would otherwise hand the last unclaimed name to
+# whichever cluster was left over, which once labelled a low-entropy single-app cluster
+# "Comparison Shoppers". The original floor of 0.15 let a 6-user cluster of extreme
+# buyers match "Single-App Regulars" on real data, so it was raised.
+MIN_SIGNATURE_SIMILARITY = 0.5
+
+# A signature is only eligible when the features it can still be evaluated on carry at
+# least this share of its total weight (by vector norm). Without it, a signature whose
+# defining features are all dead degenerates to one leftover term: "Bargain Hunters"
+# with both discount features constant reduced to "low average order value", and then
+# matched any cheap cluster with perfect cosine similarity.
+MIN_SIGNATURE_COVERAGE = 0.75
+
+# Features whose standard deviation across users is at or below this are treated as dead.
+DEAD_FEATURE_STD = 1e-9
 
 
 def load_segmentation_data(
@@ -158,6 +177,7 @@ def load_segmentation_data(
 def scale_features(
     df: pl.DataFrame,
     feature_names: Optional[List[str]] = None,
+    recency_fill: Optional[Dict[str, float]] = None,
 ) -> Tuple[np.ndarray, List[str], StandardScaler]:
     """
     Standardizes the clustering features to zero mean and unit variance.
@@ -165,13 +185,45 @@ def scale_features(
     Distance-based clustering is scale sensitive: total spend runs into the hundreds of
     thousands of rupees while app entropy is bounded by 2, so without standardization
     spend alone would dictate every cluster boundary.
+
+    A missing recency (the user never purchased, or never added to cart) is censored at
+    the longest recency observed, or at `recency_fill` when supplied. Zero filling put
+    never-purchasers beside users who purchased today; the tree models' 9999 sentinel is
+    right for trees but collapses the standardized column into a binary flag that cut
+    the synthetic segmentation from five recovered archetypes to three.
     """
     names = feature_names or [c for c in SEGMENTATION_FEATURES if c in df.columns]
-    raw = df.select(names).to_pandas().fillna(0.0).to_numpy(dtype=np.float64)
+    fills = recency_fill if recency_fill is not None else censored_recency_fill(df, names)
+    raw = fill_missing_features(df, names, recency_fill=fills).to_numpy().astype(np.float64)
 
     scaler = StandardScaler()
     scaled = scaler.fit_transform(raw)
     return scaled, names, scaler
+
+
+def split_live_features(
+    df: pl.DataFrame,
+    feature_names: Optional[List[str]] = None,
+    min_std: float = DEAD_FEATURE_STD,
+) -> Tuple[List[str], List[str]]:
+    """
+    Separates features that vary across users from those that are constant.
+
+    A constant column carries no information, makes `StandardScaler` divide by zero, and
+    silently distorts signature matching, so it is excluded from clustering and naming.
+    Returns `(live, dead)`.
+    """
+    names = feature_names or [c for c in SEGMENTATION_FEATURES if c in df.columns]
+    filled = fill_missing_features(df, names, recency_fill=censored_recency_fill(df, names))
+    live: List[str] = []
+    dead: List[str] = []
+    for name in names:
+        std = filled[name].std()
+        if std is None or not np.isfinite(std) or std <= min_std:
+            dead.append(name)
+        else:
+            live.append(name)
+    return live, dead
 
 
 def evaluate_k_range(
@@ -206,6 +258,17 @@ def select_best_k(scores: pl.DataFrame) -> int:
     """Returns the k with the highest silhouette score."""
     best_row = scores.sort("silhouette", descending=True).head(1)
     return int(best_row["k"][0])
+
+
+def k_at_range_boundary(scores: pl.DataFrame, best_k: int) -> bool:
+    """
+    Returns whether the chosen k is the largest candidate tried.
+
+    When silhouette is still rising at the top of the range, the range did not contain
+    an optimum and the selection is an artifact of where the search stopped. On real data
+    this happened while silhouette was rewarding the isolation of a few extreme users.
+    """
+    return int(best_k) == int(scores["k"].max())
 
 
 def fit_kmeans(
@@ -302,16 +365,50 @@ def profile_clusters(
     return labelled.group_by("cluster").agg(aggregations).sort("cluster")
 
 
-def compute_cluster_zscores(profile: pl.DataFrame, feature_names: List[str]) -> pl.DataFrame:
-    """Expresses each cluster's feature means as deviations from the population mean."""
-    out = profile.select(["cluster", "users"])
-    for name in feature_names:
-        values = profile[name].to_numpy().astype(float)
-        mean = float(np.mean(values))
-        std = float(np.std(values))
-        z = (values - mean) / std if std > 0 else np.zeros_like(values)
-        out = out.with_columns(pl.Series(name, z))
-    return out
+def compute_cluster_zscores(
+    X: np.ndarray,
+    labels: np.ndarray,
+    feature_names: List[str],
+) -> pl.DataFrame:
+    """
+    Expresses each cluster's centroid as a deviation from the user population.
+
+    `X` is the standardized feature matrix, so each column already has mean zero and
+    unit variance across users, and a cluster's mean row is its z-profile directly.
+
+    Z-scores were previously computed across cluster means with every cluster weighted
+    equally. One tiny cluster of extreme users then dominated the reference point: on
+    real data a 6-user cluster averaging 117 purchases dragged the mean high enough that
+    a cluster of heavy buyers scored below average and was named "Window Shoppers".
+    """
+    rows: List[Dict[str, Any]] = []
+    for cluster in sorted(set(int(c) for c in labels)):
+        mask = labels == cluster
+        centroid = X[mask].mean(axis=0)
+        row: Dict[str, Any] = {"cluster": cluster, "users": int(mask.sum())}
+        row.update({name: float(centroid[i]) for i, name in enumerate(feature_names)})
+        rows.append(row)
+    return pl.DataFrame(rows)
+
+
+def signature_coverage(weights: Dict[str, float], feature_names: List[str]) -> float:
+    """
+    Returns the share of a signature's weight norm carried by available features.
+    """
+    total = float(np.sqrt(sum(w * w for w in weights.values())))
+    if total == 0.0:
+        return 0.0
+    usable = float(np.sqrt(sum(w * w for f, w in weights.items() if f in feature_names)))
+    return usable / total
+
+
+def eligible_signatures(
+    feature_names: List[str],
+    signatures: Optional[Dict[str, Dict[str, float]]] = None,
+) -> Dict[str, float]:
+    """Returns each signature's coverage, for reporting which names the data supports."""
+    sigs = signatures or SEGMENT_SIGNATURES
+    return {name: signature_coverage(weights, feature_names) for name, weights in sigs.items()}
 
 
 def name_clusters(
@@ -322,9 +419,12 @@ def name_clusters(
     """
     Assigns each cluster the segment name whose signature best matches its z-profile.
 
-    Matching is a dot product between the cluster's z-scores and the signature weights.
-    Each name is used at most once, assigned greedily by strongest match, so two
-    clusters never collapse to the same label.
+    Matching is the cosine similarity between the cluster's z-scores and the signature
+    weights, over the features present in `feature_names`. A signature is skipped when
+    those features carry less than `MIN_SIGNATURE_COVERAGE` of its weight, because what
+    remains no longer describes the segment it is named after. Each name is used at
+    most once, assigned greedily by strongest match, so two clusters never collapse to
+    the same label.
     """
     sigs = signatures or SEGMENT_SIGNATURES
 
@@ -338,6 +438,8 @@ def name_clusters(
                 if feature in feature_names and feature in row
             }
             if not usable:
+                continue
+            if signature_coverage(weights, feature_names) < MIN_SIGNATURE_COVERAGE:
                 continue
 
             dot = sum(float(row[feature]) * weight for feature, weight in usable.items())
@@ -543,18 +645,43 @@ def run_segmentation_pipeline(
     k_values: Tuple[int, ...] = DEFAULT_K_VALUES,
     min_cluster_size: int = 15,
     output_path: Optional[Union[str, Path]] = None,
+    features_dir: Optional[Union[str, Path]] = None,
+    artifacts_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    """Runs cluster selection, fits both clusterers, profiles and names the segments."""
-    df = load_segmentation_data()
-    X, feature_names, scaler = scale_features(df)
+    """
+    Runs cluster selection, fits both clusterers, profiles and names the segments.
+
+    `features_dir` reads the train matrix and CLV table from another dataset's feature
+    directory and writes the segment table there; `artifacts_dir` redirects the model,
+    scaler, plots, and summary. Explicit paths win over them.
+    """
+    df = load_segmentation_data(
+        features_path=rebase_path(TRAIN_FEATURES_PATH, features_dir),
+        clv_path=rebase_path(USER_CLV_PATH, features_dir),
+    )
+    feature_names, dead_features = split_live_features(df)
+    if dead_features:
+        print(f"Dropping {len(dead_features)} constant features with no information: "
+              f"{', '.join(dead_features)}")
+    recency_fill = censored_recency_fill(df, feature_names)
+    X, feature_names, scaler = scale_features(df, feature_names, recency_fill=recency_fill)
     print(f"Clustering {X.shape[0]} users on {X.shape[1]} standardized features")
+
+    coverage = eligible_signatures(feature_names)
+    unsupported = [name for name, value in coverage.items() if value < MIN_SIGNATURE_COVERAGE]
+    if unsupported:
+        print(f"  Segment names the populated features cannot support: {', '.join(unsupported)}")
 
     print("\n--- Cluster Count Selection ---")
     scores = evaluate_k_range(X, k_values=k_values)
     print(scores)
 
     best_k = select_best_k(scores)
+    at_boundary = k_at_range_boundary(scores, best_k)
     print(f"\n  Selected k = {best_k} by highest silhouette score")
+    if at_boundary:
+        print("  Note: the selected k is the largest candidate tried, so silhouette had not")
+        print("  peaked within the range. Treat the cluster count as unresolved.")
 
     kmeans_model, kmeans_labels = fit_kmeans(X, n_clusters=best_k)
     kmeans_quality = score_clustering(X, kmeans_labels)
@@ -577,7 +704,7 @@ def run_segmentation_pipeline(
     print("  to no dense region as noise, which KMeans cannot do.")
 
     profile = profile_clusters(df, kmeans_labels, feature_names)
-    zscores = compute_cluster_zscores(profile, feature_names)
+    zscores = compute_cluster_zscores(X, kmeans_labels, feature_names)
     cluster_names = name_clusters(zscores, feature_names)
 
     print("\n--- Segment Profiles ---")
@@ -590,12 +717,20 @@ def run_segmentation_pipeline(
         name = cluster_names[cluster]
         description = describe_cluster(row, zscore_rows[cluster], feature_names)
         print(f"\n  Cluster {cluster} \"{name}\": {description}")
-        print(f"    events 30d {row['total_events_30d']:.0f} | "
-              f"purchases 30d {row['total_purchases_30d']:.2f} | "
-              f"spend 30d {float(row['total_spend_30d']):,.0f} INR")
-        print(f"    app entropy {row['app_entropy']:.3f} | "
-              f"cross-app comparisons {row['cross_app_comparison_count']:.1f} | "
-              f"avg discount {row['avg_discount_pct_on_purchases']:.1f}%")
+        readout = [
+            ("events 30d", "total_events_30d", "{:.0f}"),
+            ("purchases 30d", "total_purchases_30d", "{:.2f}"),
+            ("spend 30d", "total_spend_30d", "{:,.0f}"),
+            ("app entropy", "app_entropy", "{:.3f}"),
+            ("cross-app comparisons", "cross_app_comparison_count", "{:.1f}"),
+            ("avg discount %", "avg_discount_pct_on_purchases", "{:.1f}"),
+        ]
+        parts = [
+            f"{label} {fmt.format(float(row[key]))}"
+            for label, key, fmt in readout
+            if key in row and row[key] is not None
+        ]
+        print("    " + " | ".join(parts))
         if "predicted_clv" in row and row["predicted_clv"] is not None:
             print(f"    mean predicted CLV {float(row['predicted_clv']):,.0f} INR")
 
@@ -615,19 +750,29 @@ def run_segmentation_pipeline(
             pl.Series("segment_name", [cluster_names[int(c)] for c in kmeans_labels]),
         ]
     )
-    out_path = Path(output_path) if output_path else USER_SEGMENTS_PATH
+    out_path = Path(output_path) if output_path else rebase_path(USER_SEGMENTS_PATH, features_dir)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     segments.write_parquet(out_path)
 
-    elbow_plot = plot_elbow_and_silhouette(scores, best_k)
-    pca_plot, explained_variance = plot_pca_scatter(
-        X, kmeans_labels, hdbscan_labels, cluster_names
-    )
-    profile_plot = plot_cluster_profiles(zscores, feature_names, cluster_names)
+    model_path = rebase_path(SEGMENTATION_MODEL_PATH, artifacts_dir)
+    scaler_path = rebase_path(SEGMENTATION_SCALER_PATH, artifacts_dir)
+    summary_path = rebase_path(SEGMENTATION_SUMMARY_PATH, artifacts_dir)
 
-    SEGMENTATION_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(kmeans_model, SEGMENTATION_MODEL_PATH)
-    joblib.dump(scaler, SEGMENTATION_SCALER_PATH)
+    elbow_plot = plot_elbow_and_silhouette(
+        scores, best_k, output_path=rebase_path(ELBOW_PLOT_PATH, artifacts_dir)
+    )
+    pca_plot, explained_variance = plot_pca_scatter(
+        X, kmeans_labels, hdbscan_labels, cluster_names,
+        output_path=rebase_path(PCA_PLOT_PATH, artifacts_dir),
+    )
+    profile_plot = plot_cluster_profiles(
+        zscores, feature_names, cluster_names,
+        output_path=rebase_path(PROFILE_PLOT_PATH, artifacts_dir),
+    )
+
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(kmeans_model, model_path)
+    joblib.dump(scaler, scaler_path)
 
     if "archetype" in df.columns:
         crosstab = (
@@ -645,23 +790,29 @@ def run_segmentation_pipeline(
     payload = {
         "n_users": int(X.shape[0]),
         "feature_names": feature_names,
+        "dropped_constant_features": dead_features,
+        # Serving must fill missing recency with these exact values before applying the
+        # saved scaler, or new users will be placed inconsistently with training.
+        "recency_fill_values": recency_fill,
+        "signature_coverage": coverage,
         "k_selection": scores.to_dicts(),
         "selected_k": best_k,
+        "selected_k_at_range_boundary": at_boundary,
         "kmeans_quality": kmeans_quality,
         "hdbscan_quality": hdbscan_quality,
         "pca_explained_variance": explained_variance,
         "segments": descriptions,
         "cluster_profile": profile.to_dicts(),
     }
-    with open(SEGMENTATION_SUMMARY_PATH, "w", encoding="utf-8") as f:
+    with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, default=float)
 
     print(f"\nSaved segment assignments to {out_path}")
     print(f"Saved elbow plot to         {elbow_plot}")
     print(f"Saved PCA scatter to        {pca_plot}")
     print(f"Saved profile heatmap to    {profile_plot}")
-    print(f"Saved model to              {SEGMENTATION_MODEL_PATH}")
-    print(f"Saved summary to            {SEGMENTATION_SUMMARY_PATH}")
+    print(f"Saved model to              {model_path}")
+    print(f"Saved summary to            {summary_path}")
 
     return {
         "kmeans": kmeans_model,
@@ -669,6 +820,7 @@ def run_segmentation_pipeline(
         "scaler": scaler,
         "scaled_features": X,
         "feature_names": feature_names,
+        "dropped_features": dead_features,
         "k_scores": scores,
         "selected_k": best_k,
         "kmeans_labels": kmeans_labels,
@@ -682,7 +834,9 @@ def run_segmentation_pipeline(
             "elbow_plot": elbow_plot,
             "pca_plot": pca_plot,
             "profile_plot": profile_plot,
-            "summary": SEGMENTATION_SUMMARY_PATH,
+            "model": model_path,
+            "scaler": scaler_path,
+            "summary": summary_path,
         },
     }
 
@@ -691,8 +845,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run KMeans and HDBSCAN user segmentation.")
     parser.add_argument("--k-values", type=int, nargs="+", default=list(DEFAULT_K_VALUES))
     parser.add_argument("--min-cluster-size", type=int, default=15)
+    parser.add_argument("--features-dir", type=str, default=None, help="Feature directory to read and write")
+    parser.add_argument("--artifacts-dir", type=str, default=None, help="Directory for model outputs")
     args = parser.parse_args()
 
     run_segmentation_pipeline(
-        k_values=tuple(args.k_values), min_cluster_size=args.min_cluster_size
+        k_values=tuple(args.k_values),
+        min_cluster_size=args.min_cluster_size,
+        features_dir=args.features_dir,
+        artifacts_dir=args.artifacts_dir,
     )

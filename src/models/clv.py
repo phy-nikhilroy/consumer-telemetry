@@ -52,6 +52,7 @@ from src.config import (
     PROCESSED_DATA_DIR,
     USD_TO_INR_RATE,
     USER_CLV_PATH,
+    rebase_path,
 )
 from src.features.database import DatabaseManager
 
@@ -365,8 +366,22 @@ def run_clv_pipeline(
     output_path: Optional[Union[str, Path]] = None,
     db_path: Optional[Union[str, Path]] = None,
     top_n: int = 10,
+    features_dir: Optional[Union[str, Path]] = None,
+    artifacts_dir: Optional[Union[str, Path]] = None,
+    archetype_events_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    """Fits both CLV models, writes predictions, and prints the ranked user readout."""
+    """
+    Fits both CLV models, writes predictions, and prints the ranked user readout.
+
+    `features_dir` and `artifacts_dir` redirect the prediction table and the model
+    artifacts to another dataset's directories. Simulator archetypes are joined only
+    for the default synthetic warehouse, or when `archetype_events_path` names an event
+    log explicitly: joining the synthetic archetypes onto another warehouse's users
+    would silently attach labels that do not belong to them.
+    """
+    bgnbd_path = rebase_path(CLV_BGNBD_PATH, artifacts_dir)
+    gamma_gamma_path = rebase_path(CLV_GAMMAGAMMA_PATH, artifacts_dir)
+    summary_out = rebase_path(CLV_SUMMARY_PATH, artifacts_dir)
     print("Loading purchase transaction log from the warehouse...")
     transactions = load_purchase_transactions(db_path=db_path)
     print(f"  {transactions.height} purchase transactions "
@@ -414,11 +429,15 @@ def run_clv_pipeline(
     if clv_df["predicted_clv"].min() < 0.0:
         raise ValueError("Negative CLV predictions produced")
 
-    archetypes = load_user_archetypes()
+    archetypes = (
+        load_user_archetypes(archetype_events_path)
+        if archetype_events_path is not None or db_path is None
+        else None
+    )
     if archetypes is not None:
         clv_df = clv_df.join(archetypes, on="user_id", how="left")
 
-    out_path = Path(output_path) if output_path else USER_CLV_PATH
+    out_path = Path(output_path) if output_path else rebase_path(USER_CLV_PATH, features_dir)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     clv_df.write_parquet(out_path)
     print(f"  Saved {clv_df.height} CLV predictions to {out_path}")
@@ -449,14 +468,16 @@ def run_clv_pipeline(
         print("  feature. Its ordering here is an independent check that CLV recovers the")
         print("  latent behavior that generated the data.")
 
-    plot_path = plot_clv_distribution(clv_df)
+    plot_path = plot_clv_distribution(
+        clv_df, output_path=rebase_path(CLV_DISTRIBUTION_PLOT_PATH, artifacts_dir)
+    )
 
     # The lifetimes fitters attach a lambda to the instance during fit, which both pickle
     # and joblib refuse to serialize. The library's own save_model uses dill and can drop
     # that method, so it is used here in place of joblib.
-    CLV_BGNBD_PATH.parent.mkdir(parents=True, exist_ok=True)
-    bgf.save_model(str(CLV_BGNBD_PATH), save_generate_data_method=False)
-    ggf.save_model(str(CLV_GAMMAGAMMA_PATH), save_generate_data_method=False)
+    bgnbd_path.parent.mkdir(parents=True, exist_ok=True)
+    bgf.save_model(str(bgnbd_path), save_generate_data_method=False)
+    ggf.save_model(str(gamma_gamma_path), save_generate_data_method=False)
 
     payload: Dict[str, Any] = {
         "horizon_days": horizon_days,
@@ -479,13 +500,13 @@ def run_clv_pipeline(
     if archetype_summary is not None:
         payload["archetype_summary"] = archetype_summary.to_dicts()
 
-    with open(CLV_SUMMARY_PATH, "w", encoding="utf-8") as f:
+    with open(summary_out, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
-    print(f"\nSaved BG/NBD model to      {CLV_BGNBD_PATH}")
-    print(f"Saved Gamma-Gamma model to {CLV_GAMMAGAMMA_PATH}")
+    print(f"\nSaved BG/NBD model to      {bgnbd_path}")
+    print(f"Saved Gamma-Gamma model to {gamma_gamma_path}")
     print(f"Saved diagnostics plot to  {plot_path}")
-    print(f"Saved summary to           {CLV_SUMMARY_PATH}")
+    print(f"Saved summary to           {summary_out}")
 
     return {
         "bgnbd": bgf,
@@ -495,10 +516,10 @@ def run_clv_pipeline(
         "archetype_summary": archetype_summary,
         "paths": {
             "predictions": out_path,
-            "bgnbd": CLV_BGNBD_PATH,
-            "gamma_gamma": CLV_GAMMAGAMMA_PATH,
+            "bgnbd": bgnbd_path,
+            "gamma_gamma": gamma_gamma_path,
             "plot": plot_path,
-            "summary": CLV_SUMMARY_PATH,
+            "summary": summary_out,
         },
     }
 
@@ -508,8 +529,16 @@ if __name__ == "__main__":
     parser.add_argument("--horizon", type=int, default=DEFAULT_HORIZON_DAYS, help="Horizon in days")
     parser.add_argument("--penalizer", type=float, default=DEFAULT_PENALIZER, help="L2 penalizer")
     parser.add_argument("--top-n", type=int, default=10, help="Users listed at each extreme")
+    parser.add_argument("--db-path", type=str, default=None, help="Warehouse to read (default: synthetic)")
+    parser.add_argument("--features-dir", type=str, default=None, help="Directory for user_clv.parquet")
+    parser.add_argument("--artifacts-dir", type=str, default=None, help="Directory for model outputs")
     args = parser.parse_args()
 
     run_clv_pipeline(
-        horizon_days=args.horizon, penalizer_coef=args.penalizer, top_n=args.top_n
+        horizon_days=args.horizon,
+        penalizer_coef=args.penalizer,
+        top_n=args.top_n,
+        db_path=args.db_path,
+        features_dir=args.features_dir,
+        artifacts_dir=args.artifacts_dir,
     )

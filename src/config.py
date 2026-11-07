@@ -2,7 +2,10 @@
 Central project configuration, filesystem paths, and global parameters.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import Optional, Union
 
 # Base paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -56,4 +59,30 @@ PRIMARY_TARGET = "will_purchase_next_7d"
 SWITCHING_TARGET = "will_switch_app_next_7d"
 COUNT_TARGET = "num_purchases_next_7d"
 TARGET_COLUMNS = (PRIMARY_TARGET, COUNT_TARGET, SWITCHING_TARGET)
+
+# Recency features measure days since a user last did something. A null means the user
+# has never done it, which is the opposite of "did it today", so these columns must not
+# be zero filled. They take a sentinel larger than any observable recency instead; tree
+# models only use its ordering, and a fixed constant keeps train, test, and serving
+# consistent. Zero filling cost 61 percent of propensity PR-AUC on real clickstream data.
+RECENCY_FEATURES = (
+    "days_since_last_event",
+    "days_since_last_purchase",
+    "days_since_last_cart_add",
+)
+RECENCY_NULL_SENTINEL_DAYS = 9999.0
 RANDOM_SEED = 42
+
+
+def rebase_path(default: Path, directory: Optional[Union[str, Path]] = None) -> Path:
+    """
+    Returns `default` unchanged, or the same file name inside `directory` when given.
+
+    Every orchestrator writes its outputs through this, so pointing a run at a second
+    dataset only requires passing that run's own features and artifacts directories.
+    Without it, a real-data run once silently overwrote the committed synthetic
+    `selected_features.json`.
+    """
+    if directory is None:
+        return default
+    return Path(directory) / default.name

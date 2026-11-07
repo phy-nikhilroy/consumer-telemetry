@@ -9,7 +9,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Ensure consumer-telemetry root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -20,7 +20,8 @@ import numpy as np
 import polars as pl
 from sklearn.ensemble import RandomForestClassifier
 
-from src.config import TRAIN_FEATURES_PATH, SELECTED_FEATURES_PATH
+from src.config import TRAIN_FEATURES_PATH, SELECTED_FEATURES_PATH, rebase_path
+from src.features.feature_store import fill_missing_features
 
 DEFAULT_TRAIN_PATH = TRAIN_FEATURES_PATH
 DEFAULT_SELECTED_PATH = SELECTED_FEATURES_PATH
@@ -83,7 +84,9 @@ def analyze_correlations_and_redundancy(
         if c not in ["user_id", "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d", "top_category_l1"]
     ]
 
-    pdf = df.select(feature_cols + [target_col]).to_pandas().fillna(0.0)
+    # Nulls are filled exactly as the modeling matrices fill them, so selection judges
+    # the same encoding the estimators will see.
+    pdf = fill_missing_features(df, feature_cols + [target_col]).to_pandas()
 
     # Correlation with target (fill NaN from zero-variance columns with 0.0)
     corr_matrix = pdf.corr().fillna(0.0)
@@ -119,7 +122,7 @@ def compute_feature_importances(
         if c not in ["user_id", "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d", "top_category_l1"]
     ]
 
-    X = df.select(feature_cols).to_pandas().fillna(0.0)
+    X = fill_missing_features(df, feature_cols).to_pandas()
     y = df[target_col].to_numpy()
 
     model = RandomForestClassifier(n_estimators=100, random_state=random_state)
@@ -191,11 +194,21 @@ def select_features(
 
 
 def run_feature_validation_pipeline(
-    train_path: Optional[str] = None,
-    output_json_path: Optional[str] = None
+    train_path: Optional[Union[str, Path]] = None,
+    output_json_path: Optional[Union[str, Path]] = None,
+    features_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    """Executes feature audit, correlation analysis, tree importance, and selection."""
-    in_path = Path(train_path) if train_path else DEFAULT_TRAIN_PATH
+    """
+    Executes feature audit, correlation analysis, tree importance, and selection.
+
+    `features_dir` points both the input matrix and the output selection at another
+    dataset's feature directory; explicit paths win over it.
+    """
+    in_path = Path(train_path) if train_path else rebase_path(DEFAULT_TRAIN_PATH, features_dir)
+    out_path = (
+        Path(output_json_path) if output_json_path
+        else rebase_path(DEFAULT_SELECTED_PATH, features_dir)
+    )
     print(f"Loading feature matrix from {in_path}...")
     df = pl.read_parquet(in_path)
 
@@ -223,9 +236,9 @@ def run_feature_validation_pipeline(
         df=df,
         importance_scores=importances,
         collinear_pairs=collinear,
-        output_path=output_json_path
+        output_path=out_path
     )
-    print(f"Selected {selection['selected_feature_count']} features. Saved to {output_json_path or DEFAULT_SELECTED_PATH}")
+    print(f"Selected {selection['selected_feature_count']} features. Saved to {out_path}")
 
     print("\n--- 5. Top 3 Most Predictive Features Summary ---")
     for i, item in enumerate(selection["top_predictive_features"][:3], 1):
@@ -244,6 +257,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Feature Store EDA and Selection Pipeline.")
     parser.add_argument("--train-path", type=str, default=None, help="Train feature parquet path")
     parser.add_argument("--output-json", type=str, default=None, help="Output selected features JSON path")
+    parser.add_argument("--features-dir", type=str, default=None,
+                        help="Read and write this feature directory instead of data/features")
     args = parser.parse_args()
 
-    run_feature_validation_pipeline(train_path=args.train_path, output_json_path=args.output_json)
+    run_feature_validation_pipeline(
+        train_path=args.train_path,
+        output_json_path=args.output_json,
+        features_dir=args.features_dir,
+    )

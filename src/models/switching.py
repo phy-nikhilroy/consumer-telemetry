@@ -59,7 +59,9 @@ from src.config import (
     SWITCHING_TARGET,
     TEST_FEATURES_PATH,
     TRAIN_FEATURES_PATH,
+    rebase_path,
 )
+from src.features.feature_store import fill_missing_features
 
 MULTICLASS_LABELS: Tuple[str, ...] = ("no_purchase", "bought_on_dominant_app", "switched_app")
 
@@ -136,21 +138,28 @@ def build_multiclass_target(df: pl.DataFrame) -> np.ndarray:
 def get_switching_matrices(
     split: str = "train",
     features_path: Optional[Union[str, Path]] = None,
+    features_dir: Optional[Union[str, Path]] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
     """
     Loads one split and returns (X, y_binary, y_multiclass, feature_names).
+
+    `features_dir` reads the split and its feature selection from another dataset's
+    feature directory; an explicit `features_path` wins over it.
     """
     if features_path is None:
-        features_path = TRAIN_FEATURES_PATH if split == "train" else TEST_FEATURES_PATH
+        default = TRAIN_FEATURES_PATH if split == "train" else TEST_FEATURES_PATH
+        features_path = rebase_path(default, features_dir)
 
     path = Path(features_path)
     if not path.exists():
         raise FileNotFoundError(f"Feature matrix not found at {path}")
 
     df = pl.read_parquet(path)
-    feature_names = load_selected_feature_names(df)
+    feature_names = load_selected_feature_names(
+        df, rebase_path(SELECTED_FEATURES_PATH, features_dir)
+    )
 
-    X = df.select(feature_names).to_pandas().fillna(0.0).to_numpy(dtype=np.float32)
+    X = fill_missing_features(df, feature_names).to_numpy().astype(np.float32)
     y_binary = df[SWITCHING_TARGET].to_numpy()
     y_multiclass = build_multiclass_target(df)
 
@@ -460,10 +469,21 @@ def run_switching_pipeline(
     multiclass_path: Optional[Union[str, Path]] = None,
     metrics_path: Optional[Union[str, Path]] = None,
     top_n_drivers: int = 5,
+    features_dir: Optional[Union[str, Path]] = None,
+    artifacts_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
-    """Trains, evaluates, explains, and persists both switching formulations."""
-    X_train, y_bin_train, y_mc_train, feature_names = get_switching_matrices("train")
-    X_test, y_bin_test, y_mc_test, test_names = get_switching_matrices("test")
+    """
+    Trains, evaluates, explains, and persists both switching formulations.
+
+    `features_dir` and `artifacts_dir` redirect inputs and outputs to another dataset's
+    directories; explicit paths win over them.
+    """
+    X_train, y_bin_train, y_mc_train, feature_names = get_switching_matrices(
+        "train", features_dir=features_dir
+    )
+    X_test, y_bin_test, y_mc_test, test_names = get_switching_matrices(
+        "test", features_dir=features_dir
+    )
 
     if feature_names != test_names:
         raise ValueError("Train and test feature ordering differ; refusing to train.")
@@ -523,17 +543,29 @@ def run_switching_pipeline(
         print(f"    {row['rank']}. {row['feature']} "
               f"(mean |SHAP| {row['mean_abs_shap']:.4f}, {row['effect']})")
 
-    b_out = Path(model_path) if model_path else SWITCHING_MODEL_PATH
-    m_out = Path(multiclass_path) if multiclass_path else SWITCHING_MULTICLASS_PATH
+    b_out = Path(model_path) if model_path else rebase_path(SWITCHING_MODEL_PATH, artifacts_dir)
+    m_out = (
+        Path(multiclass_path) if multiclass_path
+        else rebase_path(SWITCHING_MULTICLASS_PATH, artifacts_dir)
+    )
     b_out.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(binary_model, b_out)
     joblib.dump(multiclass_model, m_out)
 
-    summary_plot = plot_shap_summary(shap_values, X_test, feature_names)
-    bar_plot = plot_shap_importance_bar(shap_values, X_test, feature_names)
-    confusion_plot = plot_confusion_matrix(mc_test_metrics["confusion_matrix"])
+    summary_plot = plot_shap_summary(
+        shap_values, X_test, feature_names,
+        output_path=rebase_path(SHAP_SUMMARY_PLOT_PATH, artifacts_dir),
+    )
+    bar_plot = plot_shap_importance_bar(
+        shap_values, X_test, feature_names,
+        output_path=rebase_path(SHAP_BAR_PLOT_PATH, artifacts_dir),
+    )
+    confusion_plot = plot_confusion_matrix(
+        mc_test_metrics["confusion_matrix"],
+        output_path=rebase_path(SWITCHING_CONFUSION_PLOT_PATH, artifacts_dir),
+    )
 
-    metrics_out = Path(metrics_path) if metrics_path else SWITCHING_METRICS_PATH
+    metrics_out = Path(metrics_path) if metrics_path else rebase_path(SWITCHING_METRICS_PATH, artifacts_dir)
     payload = {
         "binary_target": SWITCHING_TARGET,
         "feature_names": feature_names,
@@ -546,6 +578,7 @@ def run_switching_pipeline(
         "multiclass_test": {k: v for k, v in mc_test_metrics.items() if k != "classification_report"},
         "top_shap_drivers": drivers.to_dicts(),
     }
+    metrics_out.parent.mkdir(parents=True, exist_ok=True)
     with open(metrics_out, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
@@ -581,6 +614,12 @@ def run_switching_pipeline(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the app switching models with SHAP attribution.")
     parser.add_argument("--top-n", type=int, default=5, help="Number of SHAP drivers to report")
+    parser.add_argument("--features-dir", type=str, default=None, help="Feature directory to read")
+    parser.add_argument("--artifacts-dir", type=str, default=None, help="Directory for outputs")
     args = parser.parse_args()
 
-    run_switching_pipeline(top_n_drivers=args.top_n)
+    run_switching_pipeline(
+        top_n_drivers=args.top_n,
+        features_dir=args.features_dir,
+        artifacts_dir=args.artifacts_dir,
+    )

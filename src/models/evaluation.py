@@ -46,6 +46,7 @@ from src.config import (
     PRIMARY_TARGET,
     PROPENSITY_CALIBRATED_PATH,
     RANDOM_SEED,
+    rebase_path,
 )
 from src.features.feature_store import get_modeling_matrices
 from src.models.propensity import (
@@ -422,15 +423,24 @@ def run_evaluation_pipeline(
     n_bins: int = 10,
     calibrated_model_path: Optional[Union[str, Path]] = None,
     summary_path: Optional[Union[str, Path]] = None,
+    features_dir: Optional[Union[str, Path]] = None,
+    artifacts_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Runs the full calibration and lift analysis and writes every chart and summary.
 
+    `features_dir` and `artifacts_dir` redirect inputs and outputs to another dataset's
+    directories; explicit paths win over them.
+
     Returns the decile table, the gains curve, before and after calibration metrics, and
     the paths of the artifacts written.
     """
-    X_train, y_train, feature_names = get_modeling_matrices(split="train", target_col=target_col)
-    X_test, y_test, _ = get_modeling_matrices(split="test", target_col=target_col)
+    X_train, y_train, feature_names = get_modeling_matrices(
+        split="train", target_col=target_col, features_dir=features_dir
+    )
+    X_test, y_test, _ = get_modeling_matrices(
+        split="test", target_col=target_col, features_dir=features_dir
+    )
 
     print("Fitting uncalibrated propensity model...")
     base_model = train_propensity_model(X_train, y_train)
@@ -501,18 +511,27 @@ def run_evaluation_pipeline(
     print(f"  Top 30 percent of predicted users capture {capture_30:.1%} of all purchasers.")
     print(f"  The top decile is {top_decile_lift:.2f} times more likely to purchase than random.")
 
-    calib_out = Path(calibrated_model_path) if calibrated_model_path else PROPENSITY_CALIBRATED_PATH
+    calib_out = (
+        Path(calibrated_model_path) if calibrated_model_path
+        else rebase_path(PROPENSITY_CALIBRATED_PATH, artifacts_dir)
+    )
     calib_out.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(calibrated_model, calib_out)
 
     calibration_plot = plot_calibration_curves(
-        y_test, proba_before, proba_after, label_after=f"{best_method.capitalize()} calibrated"
+        y_test,
+        proba_before,
+        proba_after,
+        label_after=f"{best_method.capitalize()} calibrated",
+        output_path=rebase_path(CALIBRATION_PLOT_PATH, artifacts_dir),
     )
-    lift_plot = plot_lift_chart(lift_df)
-    gains_plot = plot_cumulative_gains(gains_df)
-    roc_pr_plot = plot_roc_and_pr_curves(y_test, proba_after)
+    lift_plot = plot_lift_chart(lift_df, output_path=rebase_path(LIFT_PLOT_PATH, artifacts_dir))
+    gains_plot = plot_cumulative_gains(gains_df, output_path=rebase_path(GAINS_PLOT_PATH, artifacts_dir))
+    roc_pr_plot = plot_roc_and_pr_curves(
+        y_test, proba_after, output_path=rebase_path(ROC_PR_PLOT_PATH, artifacts_dir)
+    )
 
-    s_out = Path(summary_path) if summary_path else EVALUATION_SUMMARY_PATH
+    s_out = Path(summary_path) if summary_path else rebase_path(EVALUATION_SUMMARY_PATH, artifacts_dir)
     summary = {
         "target": target_col,
         "calibration_method": best_method,
@@ -525,6 +544,7 @@ def run_evaluation_pipeline(
         "capture_top_30_pct": capture_30,
         "decile_table": lift_df.to_dicts(),
     }
+    s_out.parent.mkdir(parents=True, exist_ok=True)
     with open(s_out, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
@@ -562,6 +582,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run calibration, lift, and gains analysis.")
     parser.add_argument("--target", type=str, default=PRIMARY_TARGET, help="Binary target column")
     parser.add_argument("--bins", type=int, default=10, help="Number of ranking bins (deciles)")
+    parser.add_argument("--features-dir", type=str, default=None, help="Feature directory to read")
+    parser.add_argument("--artifacts-dir", type=str, default=None, help="Directory for outputs")
     args = parser.parse_args()
 
-    run_evaluation_pipeline(target_col=args.target, n_bins=args.bins)
+    run_evaluation_pipeline(
+        target_col=args.target,
+        n_bins=args.bins,
+        features_dir=args.features_dir,
+        artifacts_dir=args.artifacts_dir,
+    )

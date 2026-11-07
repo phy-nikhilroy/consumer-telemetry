@@ -2,56 +2,56 @@
   "target": "will_purchase_next_7d",
   "feature_names": [
     "view_to_cart_ratio",
-    "days_since_last_event",
     "days_since_last_cart_add",
+    "days_since_last_event",
     "total_spend_30d",
-    "total_purchases_30d",
     "total_purchases_7d",
-    "total_sessions_7d",
+    "total_purchases_30d",
+    "days_since_last_purchase",
     "weekend_event_share",
+    "total_sessions_7d",
     "dominant_app_share",
+    "total_events_7d",
     "total_spend_7d",
     "max_single_purchase",
-    "avg_order_value",
-    "total_events_7d",
     "avg_session_duration_minutes",
+    "avg_order_value",
     "total_sessions_30d",
-    "cross_app_comparison_count",
-    "evening_event_share",
-    "avg_time_between_sessions_hours"
+    "avg_time_between_sessions_hours",
+    "cart_to_purchase_ratio"
   ],
   "train": {
     "n_samples": 400,
     "positive_rate": 0.4175,
-    "roc_auc": 0.967952507003161,
-    "pr_auc": 0.946341089710063,
-    "f1": 0.8941176470588236,
-    "log_loss": 0.26139136317298567,
-    "brier_score": 0.07243981942375574,
+    "roc_auc": 0.9601912055716891,
+    "pr_auc": 0.9351695030002056,
+    "f1": 0.8823529411764706,
+    "log_loss": 0.2877782937834231,
+    "brier_score": 0.08172373636933988,
     "threshold": 0.5,
     "confusion_matrix": {
-      "true_negative": 212,
-      "false_positive": 21,
-      "false_negative": 15,
-      "true_positive": 152
+      "true_negative": 210,
+      "false_positive": 23,
+      "false_negative": 17,
+      "true_positive": 150
     },
-    "best_iteration": 79
+    "best_iteration": 61
   },
   "test": {
     "n_samples": 400,
     "positive_rate": 0.395,
-    "roc_auc": 0.9118370122397741,
-    "pr_auc": 0.8647862087326612,
-    "f1": 0.8214285714285714,
-    "log_loss": 0.37212911683295646,
-    "brier_score": 0.1162240557397418,
+    "roc_auc": 0.913589287582383,
+    "pr_auc": 0.8606486014268799,
+    "f1": 0.8263473053892215,
+    "log_loss": 0.3695924090880268,
+    "brier_score": 0.11406254429035875,
     "threshold": 0.5,
     "confusion_matrix": {
-      "true_negative": 202,
-      "false_positive": 40,
+      "true_negative": 204,
+      "false_positive": 38,
       "false_negative": 20,
       "true_positive": 138
     },
-    "best_iteration": 79
+    "best_iteration": 61
   }
 }

@@ -24,9 +24,12 @@ import polars as pl
 
 from src.config import (
     DEFAULT_DB_PATH,
+    RECENCY_FEATURES,
+    RECENCY_NULL_SENTINEL_DAYS,
     TRAIN_FEATURES_PATH,
     TEST_FEATURES_PATH,
     SELECTED_FEATURES_PATH,
+    rebase_path,
 )
 from src.features.database import DatabaseManager
 from src.features.rfm_features import compute_rfm_features
@@ -149,11 +152,14 @@ def generate_train_test_datasets(
     train_path: Optional[Union[str, Path]] = None,
     test_path: Optional[Union[str, Path]] = None,
     db_path: Optional[Union[str, Path]] = None,
+    features_dir: Optional[Union[str, Path]] = None,
 ) -> Tuple[pl.DataFrame, pl.DataFrame]:
     """
-    Constructs temporal train and test splits to strictly prevent data leakage:
-    - Train: reference_date = Day 20, target window = Days 21-27
-    - Test:  reference_date = Day 23, target window = Days 24-30
+    Constructs temporal train and test splits to strictly prevent data leakage.
+
+    With the default synthetic reference dates the train target window covers days 21
+    to 27 of the simulation and the test window days 24 to 30. `features_dir` redirects
+    both matrices to another directory; explicit `train_path` and `test_path` win over it.
     """
     db_mgr = DatabaseManager(db_path=db_path or DEFAULT_DB_PATH)
     con = db_mgr.get_connection()
@@ -173,8 +179,8 @@ def generate_train_test_datasets(
             con=con,
         )
 
-        t_out = Path(train_path) if train_path else DEFAULT_TRAIN_PATH
-        te_out = Path(test_path) if test_path else DEFAULT_TEST_PATH
+        t_out = Path(train_path) if train_path else rebase_path(DEFAULT_TRAIN_PATH, features_dir)
+        te_out = Path(test_path) if test_path else rebase_path(DEFAULT_TEST_PATH, features_dir)
 
         t_out.parent.mkdir(parents=True, exist_ok=True)
         te_out.parent.mkdir(parents=True, exist_ok=True)
@@ -185,15 +191,43 @@ def generate_train_test_datasets(
         print(f"Saved Train matrix to {t_out} (shape: {train_df.shape})")
         print(f"Saved Test matrix to {te_out} (shape: {test_df.shape})")
 
-        print_target_distributions(train_df, test_df)
+        print_target_distributions(
+            train_df,
+            test_df,
+            train_ref_date=train_ref_date,
+            test_ref_date=test_ref_date,
+            prediction_window_days=prediction_window_days,
+        )
 
         return train_df, test_df
     finally:
         con.close()
 
 
-def print_target_distributions(train_df: pl.DataFrame, test_df: pl.DataFrame) -> None:
-    """Prints comparative class distributions between Train and Test sets."""
+def _window_label(prefix: str, ref_date: Optional[str], window_days: int) -> str:
+    """Formats a split header from its real reference date and target window."""
+    if not ref_date:
+        return prefix
+    start = datetime.fromisoformat(str(ref_date).strip())
+    end = start + timedelta(days=window_days)
+    return f"{prefix} ({start:%Y-%m-%d} -> {end:%Y-%m-%d})"
+
+
+def print_target_distributions(
+    train_df: pl.DataFrame,
+    test_df: pl.DataFrame,
+    train_ref_date: Optional[str] = None,
+    test_ref_date: Optional[str] = None,
+    prediction_window_days: int = 7,
+) -> None:
+    """
+    Prints comparative class distributions between Train and Test sets.
+
+    Column headers are derived from the reference dates actually used. They were once
+    hardcoded as simulation day numbers, which printed 2026 day labels for a 2015 run.
+    """
+    train_label = _window_label("Train", train_ref_date, prediction_window_days)
+    test_label = _window_label("Test", test_ref_date, prediction_window_days)
     train_buyers = train_df.filter(pl.col("will_purchase_next_7d") == 1).height
     train_total = train_df.height
     train_rate = (train_buyers / train_total) * 100.0 if train_total > 0 else 0.0
@@ -206,12 +240,69 @@ def print_target_distributions(train_df: pl.DataFrame, test_df: pl.DataFrame) ->
     test_switchers = test_df.filter(pl.col("will_switch_app_next_7d") == 1).height
 
     print("\n--- Target Variable Distributions (Train vs Test) ---")
-    print(f"{'Metric':<32} | {'Train (Day 20 -> 27)':<22} | {'Test (Day 23 -> 30)':<22}")
-    print("-" * 80)
-    print(f"{'Total Users':<32} | {train_total:<22} | {test_total:<22}")
-    print(f"{'Buyers (will_purchase = 1)':<32} | {train_buyers} ({train_rate:.1f}%)" + " " * 12 + f"| {test_buyers} ({test_rate:.1f}%)")
-    print(f"{'App Switchers (will_switch = 1)':<32} | {train_switchers:<22} | {test_switchers:<22}")
-    print(f"{'Avg Purchases (num_purchases)':<32} | {train_df['num_purchases_next_7d'].mean():.2f}" + " " * 17 + f"| {test_df['num_purchases_next_7d'].mean():.2f}")
+    print(f"{'Metric':<32} | {train_label:<32} | {test_label:<32}")
+    print("-" * 100)
+    train_buyer_text = f"{train_buyers} ({train_rate:.1f}%)"
+    test_buyer_text = f"{test_buyers} ({test_rate:.1f}%)"
+    train_mean = f"{train_df['num_purchases_next_7d'].mean():.2f}"
+    test_mean = f"{test_df['num_purchases_next_7d'].mean():.2f}"
+    print(f"{'Total Users':<32} | {train_total:<32} | {test_total:<32}")
+    print(f"{'Buyers (will_purchase = 1)':<32} | {train_buyer_text:<32} | {test_buyer_text:<32}")
+    print(f"{'App Switchers (will_switch = 1)':<32} | {train_switchers:<32} | {test_switchers:<32}")
+    print(f"{'Avg Purchases (num_purchases)':<32} | {train_mean:<32} | {test_mean:<32}")
+
+
+def fill_missing_features(
+    df: pl.DataFrame,
+    feature_names: Optional[List[str]] = None,
+    recency_sentinel: float = RECENCY_NULL_SENTINEL_DAYS,
+    recency_fill: Optional[Dict[str, float]] = None,
+) -> pl.DataFrame:
+    """
+    Fills nulls in estimator-facing feature columns with semantically correct values.
+
+    Recency columns (`RECENCY_FEATURES`) take `recency_sentinel`, because a null there
+    means the event never happened and zero would claim it happened today. A per-column
+    `recency_fill` overrides the sentinel; distance-based methods use it to censor at the
+    longest observed recency instead (see `censored_recency_fill`). Every other feature
+    is a count, ratio, or amount whose null genuinely means zero.
+
+    Returns only the requested columns, cast to Float64.
+    """
+    names = feature_names if feature_names is not None else df.columns
+    overrides = recency_fill or {}
+    expressions = []
+    for name in names:
+        column = pl.col(name).cast(pl.Float64)
+        if name in RECENCY_FEATURES:
+            fill = float(overrides.get(name, recency_sentinel))
+        else:
+            fill = 0.0
+        expressions.append(column.fill_null(fill).fill_nan(fill).alias(name))
+    return df.select(expressions)
+
+
+def censored_recency_fill(
+    df: pl.DataFrame,
+    feature_names: Optional[List[str]] = None,
+) -> Dict[str, float]:
+    """
+    Returns, per recency column, the longest recency observed in `df`.
+
+    Filling a never-happened recency with this value treats the user as at least as
+    lapsed as anyone observed, which is the correct direction and, unlike the tree-model
+    sentinel, keeps the column on its natural scale. That matters for standardized
+    distance-based clustering, where a 9999 sentinel turns the column into a near-binary
+    flag that dominates every distance. The values must be persisted with any fitted
+    scaler so serving can reproduce them.
+    """
+    names = feature_names if feature_names is not None else df.columns
+    fills: Dict[str, float] = {}
+    for name in names:
+        if name in RECENCY_FEATURES and name in df.columns:
+            observed = df[name].cast(pl.Float64).drop_nulls().drop_nans()
+            fills[name] = float(observed.max()) if observed.len() else 0.0
+    return fills
 
 
 def get_modeling_matrices(
@@ -219,13 +310,18 @@ def get_modeling_matrices(
     target_col: str = "will_purchase_next_7d",
     features_path: Optional[Union[str, Path]] = None,
     selected_features_path: Optional[Union[str, Path]] = None,
+    features_dir: Optional[Union[str, Path]] = None,
 ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
     """
     Loads train or test feature matrix, filters to selected non-collinear features,
     and returns (X, y, feature_names) ready for ML estimators.
+
+    `features_dir` reads the split and its `selected_features.json` from another
+    dataset's feature directory. Explicit paths win over it.
     """
     if features_path is None:
-        features_path = TRAIN_FEATURES_PATH if split == "train" else TEST_FEATURES_PATH
+        default = TRAIN_FEATURES_PATH if split == "train" else TEST_FEATURES_PATH
+        features_path = rebase_path(default, features_dir)
 
     f_file = Path(features_path)
     if not f_file.exists():
@@ -233,7 +329,10 @@ def get_modeling_matrices(
 
     df = pl.read_parquet(f_file)
 
-    s_file = Path(selected_features_path) if selected_features_path else SELECTED_FEATURES_PATH
+    s_file = (
+        Path(selected_features_path) if selected_features_path
+        else rebase_path(SELECTED_FEATURES_PATH, features_dir)
+    )
     if s_file.exists():
         with open(s_file, "r", encoding="utf-8") as f:
             selected_info = json.load(f)
@@ -242,7 +341,7 @@ def get_modeling_matrices(
         ignore = {"user_id", "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d", "top_category_l1"}
         feature_names = [c for c in df.columns if c not in ignore]
 
-    X = df.select(feature_names).to_pandas().fillna(0.0).to_numpy(dtype=np.float32)
+    X = fill_missing_features(df, feature_names).to_numpy().astype(np.float32)
     y = df[target_col].to_numpy()
 
     return X, y, feature_names
@@ -252,6 +351,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Assemble feature store and temporal train/test datasets.")
     parser.add_argument("--train-ref", type=str, default="2026-10-18 00:00:00", help="Train reference date")
     parser.add_argument("--test-ref", type=str, default="2026-10-21 00:00:00", help="Test reference date")
+    parser.add_argument("--db-path", type=str, default=None, help="Warehouse to read (default: synthetic)")
+    parser.add_argument("--features-dir", type=str, default=None,
+                        help="Directory for the train and test matrices (default: data/features)")
     args = parser.parse_args()
 
-    generate_train_test_datasets(train_ref_date=args.train_ref, test_ref_date=args.test_ref)
+    generate_train_test_datasets(
+        train_ref_date=args.train_ref,
+        test_ref_date=args.test_ref,
+        db_path=args.db_path,
+        features_dir=args.features_dir,
+    )
