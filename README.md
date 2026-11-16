@@ -5,10 +5,10 @@ into structured product events, stores them in an analytical warehouse, engineer
 behavioral features, trains models that predict what each shopper will do next, and serves
 those predictions live through an API and a dashboard.
 
-**Status:** extraction, feature engineering, modeling, and the serving layer (API, live event
-stream, dashboard, containers) are complete and tested, with 270 passing tests. Hosting the
-stack publicly is the remaining step. See [Project Status](#project-status) and
-[Remaining Work](#remaining-work).
+**Status:** version 1.0 is complete. Extraction, feature engineering, modeling, and the serving
+layer (API, live event stream, dashboard, Docker images and Compose stack) are built, tested with
+270 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
+See [Project Status](#project-status), [Deployment](#deployment), and [Future Work](#future-work).
 
 ---
 
@@ -34,8 +34,8 @@ stack publicly is the remaining step. See [Project Status](#project-status) and
 18. [Design Decisions and Trade-offs](#design-decisions-and-trade-offs)
 19. [Testing](#testing)
 20. [Known Limitations](#known-limitations)
-21. [Remaining Work](#remaining-work)
-22. [Deployment](#deployment)
+21. [Deployment](#deployment)
+22. [Future Work](#future-work)
 
 ---
 
@@ -187,8 +187,8 @@ real datasets. See [Real-World Validation](#real-world-validation).
 | 2. Warehouse and features | Star schema, behavioral simulation, sessionization, RFM and cross-app features, feature store with forward targets, feature selection | Complete | `v0.2-features-complete` |
 | 3. Models | Propensity, calibration and lift, app switching with SHAP, CLV, segmentation, executive evaluation report, expanded test suite | Complete | `v0.3-models-complete` |
 | Validation | Full pipeline run against real Amazon listings and the RetailRocket clickstream; defects found and fixed | Complete | included in `main` |
-| 4. Serving | FastAPI ingestion and prediction endpoints, live event stream and monitor, Streamlit dashboard, Docker images and Compose stack, end-to-end tests, latency benchmarks | Complete | included in `main` |
-| 5. Hosting | Public deployment of the stack, demo recording | Not started | planned `v1.0-complete` |
+| 4. Serving | FastAPI ingestion and prediction endpoints, live event stream and monitor, Streamlit dashboard, Docker images and Compose stack, local deployment, end-to-end tests, latency benchmarks | Complete | `v1.0-complete` |
+| Future | Deeper simulation, consumer behavior analysis, statistics, and modeling; public hosting | Planned | see [Future Work](#future-work) |
 
 ---
 
@@ -517,7 +517,9 @@ docker compose --profile proxy up -d --build    # adds Nginx on :80 (API at /, d
 
 The API image builds its serving warehouse during the image build, so a container answers
 requests as soon as it starts. Compose stores the warehouse on a named volume, so ingested events
-survive restarts. When using the proxy profile, also set `DASHBOARD_BASE_PATH=dashboard`.
+survive restarts, and every service restarts automatically if it stops. When using the proxy
+profile, also set `DASHBOARD_BASE_PATH=dashboard`. See [Deployment](#deployment) for the verified
+local setup.
 
 ### Configuration
 
@@ -996,34 +998,81 @@ or could break, without any error:
   as a single Uvicorn worker. That suits demos, not production traffic.
 - **Live segments use segments learned offline.** New users are assigned to the existing five
   segments; the segments themselves are only re-learned by re-running the batch pipeline.
-- **The Docker images were written but not built in the development environment**, which has no
-  Docker. Their steps were reproduced in clean virtual environments, which installed, built the
-  warehouse, and served requests.
+- **Local deployment only.** The stack runs on one machine. It is not hosted publicly, and the
+  API has no authentication, so it should only be exposed through a short-lived tunnel for a demo.
 
 ---
 
-## Remaining Work
+## Deployment
 
-### Serving (complete)
+Version 1.0 is deployed **locally with Docker Compose**. Public hosting is deferred; see
+[Future Work](#future-work).
 
-- [x] **Ingestion API**: `POST /ingest` and `GET /health`
-- [x] **Prediction API**: propensity, profile, and segments endpoints with Pydantic response
-      models and handling for unknown users, plus activity, recent-event, and user-list endpoints
-- [x] **Docker**: API and dashboard images, `docker-compose.yml`, Nginx config, pinned requirements
-- [x] **Live stream**: event generator and terminal monitor
-- [x] **Dashboard**: live feed, user lookup, segment overview, and model performance tabs
-- [x] **End-to-end test and benchmarks**: ingest-to-prediction integration test; p50, p95, and p99
-      latency for every endpoint, with both targets met
-- [x] **Architecture diagram and API documentation** in this README
+```bash
+docker compose up -d --build        # or: make compose-up
+docker compose ps                   # api reports "healthy" after about 20 seconds
+curl http://localhost:8000/health
+```
 
-### Hosting
+| Service | Address | Image |
+| :--- | :--- | :--- |
+| API | http://localhost:8000 (interactive docs at `/docs`) | `consumer-telemetry-api`, about 3.5 GB |
+| Dashboard | http://localhost:8501 | `consumer-telemetry-dashboard`, about 0.8 GB |
+| Live stream | posts to the API every 5 to 30 seconds | reuses the API image |
 
-- [ ] **Deployment**: build the images and host the API and dashboard publicly with HTTPS and
-      automatic restarts
-- [ ] **Demo**: a short recording of the stream, the dashboard updating, and the API responding
-- [ ] **Release**: the `v1.0-complete` tag
+What was verified on the development machine:
 
-### Modeling backlog
+- Both images build, and all three services start; the API passes its health check.
+- Every endpoint answers from the container: `/health`, `/ingest`, `/user/{id}/propensity`,
+  `/user/{id}/profile`, `/analytics/segments`, and `/docs`.
+- The stream container posts events and the dashboard serves the four tabs from the API container.
+- **Automatic restart:** killing the Uvicorn process inside the API container made Docker restart
+  it, and events ingested before the crash were still there afterwards, because the serving
+  warehouse lives on a named volume.
+- The API container uses about 850 MB of memory.
+- Latency against the container matches the native server: p95 of 38 ms for `/ingest` and 44 ms for
+  `/user/{id}/propensity`, against targets of 500 ms and 200 ms.
+
+Useful commands:
+
+| Task | Command |
+| :--- | :--- |
+| Follow the API log | `docker compose logs -f api` |
+| Watch live activity | `make monitor` |
+| Stop the stack, keep data | `docker compose down` |
+| Reset the demo data | `docker compose down -v && docker compose up -d` |
+
+The stack also runs without Docker; see [Running the Live Stack](#running-the-live-stack).
+
+**Sharing a local demo.** A Cloudflare quick tunnel gives a temporary public HTTPS address for the
+local dashboard without an account (`cloudflared tunnel --url http://localhost:8501`). The address
+lasts only while the tunnel runs. Because the API has no authentication, close the tunnel when
+the demo ends.
+
+---
+
+## Future Work
+
+Further work on this project will go into the data and the modeling rather than infrastructure.
+
+### Simulation and consumer behavior
+
+- [ ] Richer behavioral simulation: seasonality, promotions and price changes, product launches,
+      and more realistic arrival processes than fixed per-user rates
+- [ ] More archetypes and mixed behavior, so users drift between archetypes over time
+- [ ] Calibrate simulator parameters against the RetailRocket clickstream and real listings
+- [ ] Repeat key results across several random seeds, and report the spread
+
+### Data analysis and statistics
+
+- [ ] Exploratory analysis of cross-app journeys: comparison paths, time to purchase, price gaps
+- [ ] Statistical testing: confidence intervals for model metrics, bootstrap comparisons between
+      models, and significance of segment differences
+- [ ] Causal questions on simulated data, where the ground truth is known: the effect of a price
+      gap on switching, uplift modeling for targeting
+- [ ] Survival analysis for time to next purchase and time to churn
+
+### Machine learning
 
 - [ ] Cold-start scoring for users with little or no history (a base rate by activity level for
       sparse visitors; in-session signals for new ones), replacing the current `low_history` flag
@@ -1034,14 +1083,20 @@ or could break, without any error:
 - [ ] Reference-date cut for batch CLV transactions (the loader supports it; the batch pipeline
       does not use it yet)
 - [ ] Output-directory flag for the extraction benchmark
-- [ ] Repeat key results across several random seeds
+- [ ] Sequence models over event histories, compared against the aggregate-feature models
+- [ ] Drift monitoring: compare live feature distributions against the training distributions
 
----
+### Public hosting (lower priority)
 
-## Deployment
+The repository already contains what a public deployment needs: the two images, the Compose stack
+with automatic restarts, and an Nginx configuration. Options considered:
 
-*This section will be completed when the stack is hosted.* It will list the live API and
-dashboard addresses and the hosting setup.
-
-Everything needed to deploy is in the repository: the two images in `docker/`, the Compose stack,
-and the Nginx configuration. To run it locally, see [Running the Live Stack](#running-the-live-stack).
+- [ ] **VPS or KVM server**: Compose stack behind Nginx or Caddy, HTTPS from Let's Encrypt, and a
+      domain name. Oracle Cloud's Always Free Arm machines have enough memory.
+- [ ] **Named Cloudflare Tunnel**: a stable address from this machine through a Cloudflare account,
+      without opening ports
+- [ ] **Managed hosting** for the dashboard alone (Streamlit Community Cloud), once the API is
+      reachable publicly. Free container hosting with 1 GB of memory, such as Hugging Face Docker
+      Spaces, may now require a paid plan.
+- [ ] Authentication and rate limiting on the API before any long-lived public address
+- [ ] A short recording of the stream, the dashboard updating, and the API responding
