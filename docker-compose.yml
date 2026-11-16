@@ -1,0 +1,67 @@
+# Full stack on one machine: API, dashboard, and the live event stream.
+#
+#   docker compose up -d --build                  API on :8000, dashboard on :8501
+#   docker compose --profile proxy up -d --build  adds Nginx on :80 (API at /, dashboard at /dashboard/)
+#
+# Behind the proxy, set DASHBOARD_BASE_PATH=dashboard so Streamlit serves under /dashboard/.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: consumer-telemetry-api
+    ports:
+      - "8000:8000"
+    environment:
+      CT_CLOCK: simulated
+    volumes:
+      # Persists ingested events across restarts. The named volume is seeded from the
+      # warehouse built into the image the first time it is created.
+      - serving-data:/app/data/processed
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
+    image: consumer-telemetry-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      CT_API_URL: http://api:8000
+      STREAMLIT_SERVER_BASE_URL_PATH: ${DASHBOARD_BASE_PATH:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: always
+
+  stream:
+    image: consumer-telemetry-api
+    pull_policy: never
+    command: ["python", "src/simulation/stream_generator.py", "--api-url", "http://api:8000"]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: always
+
+  nginx:
+    image: nginx:1.27-alpine
+    profiles: ["proxy"]
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - dashboard
+    restart: always
+
+volumes:
+  serving-data:

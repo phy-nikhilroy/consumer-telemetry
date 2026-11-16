@@ -1,15 +1,19 @@
 # Convenience targets for the consumer telemetry pipeline.
 # Every target runs through the project virtual environment in .venv/.
 
-VENV    := .venv
-PYTHON  := $(VENV)/bin/python
-PYTEST  := $(VENV)/bin/pytest
-JUPYTER := $(VENV)/bin/jupyter
+VENV      := .venv
+PYTHON    := $(VENV)/bin/python
+PYTEST    := $(VENV)/bin/pytest
+JUPYTER   := $(VENV)/bin/jupyter
+UVICORN   := $(VENV)/bin/uvicorn
+STREAMLIT := $(VENV)/bin/streamlit
+API_URL   ?= http://localhost:8000
 
 NOTEBOOKS := 04_transformer_ner 14_feature_eda 16_model_evaluation 20_model_evaluation_report
 
 .PHONY: help setup venv-check test check run-pipeline simulate sessionize features models \
-        pipeline notebooks report benchmark
+        pipeline notebooks report benchmark serving-db serving-reset api dashboard stream \
+        monitor api-benchmark docker-build compose-up compose-down
 
 help:
 	@echo "Available commands:"
@@ -26,6 +30,18 @@ help:
 	@echo "  make notebooks     - Execute every notebook in place"
 	@echo "  make report        - Export the evaluation report notebook to HTML"
 	@echo "  make benchmark     - Run the real-data extraction benchmark (needs data/external/)"
+	@echo ""
+	@echo "Serving:"
+	@echo "  make serving-db    - Create the API's serving warehouse if it is missing"
+	@echo "  make serving-reset - Rebuild the serving warehouse, discarding live events"
+	@echo "  make api           - Run the FastAPI service on port 8000 with auto-reload"
+	@echo "  make dashboard     - Run the Streamlit dashboard on port 8501"
+	@echo "  make stream        - Stream simulated events to the API (API_URL=...)"
+	@echo "  make monitor       - Print live API activity to the terminal (API_URL=...)"
+	@echo "  make api-benchmark - Measure p50/p95/p99 latency per endpoint, in process"
+	@echo "  make docker-build  - Build the API and dashboard images"
+	@echo "  make compose-up    - Start API, dashboard, and stream with Docker Compose"
+	@echo "  make compose-down  - Stop the Compose stack"
 
 setup:
 	uv venv $(VENV) --python 3.12
@@ -76,3 +92,34 @@ report:
 
 benchmark:
 	$(PYTHON) src/ingestion/real_data_benchmark.py
+
+serving-db:
+	$(PYTHON) src/api/warehouse.py
+
+serving-reset:
+	$(PYTHON) src/api/warehouse.py --reset
+
+api:
+	$(UVICORN) src.api.main:app --reload --port 8000
+
+dashboard:
+	CT_API_URL=$(API_URL) $(STREAMLIT) run src/dashboard/app.py
+
+stream:
+	$(PYTHON) src/simulation/stream_generator.py --api-url $(API_URL)
+
+monitor:
+	$(PYTHON) src/simulation/monitor.py --api-url $(API_URL)
+
+api-benchmark:
+	$(PYTHON) src/api/benchmark.py --requests 100
+
+docker-build:
+	docker build -t consumer-telemetry-api -f docker/Dockerfile .
+	docker build -t consumer-telemetry-dashboard -f docker/Dockerfile.dashboard .
+
+compose-up:
+	docker compose up -d --build
+
+compose-down:
+	docker compose down
