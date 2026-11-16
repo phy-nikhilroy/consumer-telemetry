@@ -46,6 +46,9 @@ services:
     image: consumer-telemetry-api
     pull_policy: never
     command: ["python", "src/simulation/stream_generator.py", "--api-url", "http://api:8000"]
+    # The image's health check probes the API port, which this service never opens.
+    healthcheck:
+      disable: true
     depends_on:
       api:
         condition: service_healthy
