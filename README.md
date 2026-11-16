@@ -14,22 +14,23 @@ deployment, and dashboard) is the remaining phase. See [Project Status](#project
 ## Contents
 
 1. [Project Aim](#project-aim)
-2. [How It Works](#how-it-works)
-3. [Project Status](#project-status)
-4. [Tech Stack](#tech-stack)
-5. [Repository Layout](#repository-layout)
-6. [Getting Started](#getting-started)
-7. [Makefile Reference](#makefile-reference)
-8. [Running the Pipeline](#running-the-pipeline)
-9. [Using the Outputs](#using-the-outputs)
-10. [Data Model](#data-model)
-11. [Models and Results](#models-and-results)
-12. [Real-World Validation](#real-world-validation)
-13. [Key Insights](#key-insights)
-14. [Testing](#testing)
-15. [Known Limitations](#known-limitations)
-16. [Remaining Work](#remaining-work)
-17. [Deployment](#deployment)
+2. [What Makes This Different](#what-makes-this-different)
+3. [How It Works](#how-it-works)
+4. [Project Status](#project-status)
+5. [Tech Stack](#tech-stack)
+6. [Repository Layout](#repository-layout)
+7. [Getting Started](#getting-started)
+8. [Makefile Reference](#makefile-reference)
+9. [Running the Pipeline](#running-the-pipeline)
+10. [Using the Outputs](#using-the-outputs)
+11. [Data Model](#data-model)
+12. [Models and Results](#models-and-results)
+13. [Real-World Validation](#real-world-validation)
+14. [Key Insights](#key-insights)
+15. [Testing](#testing)
+16. [Known Limitations](#known-limitations)
+17. [Remaining Work](#remaining-work)
+18. [Deployment](#deployment)
 
 ---
 
@@ -55,6 +56,34 @@ From that raw text, the project answers four business questions:
 The project is also an exercise in doing this **honestly**: every model is trained on the past and
 tested on a later, unseen period, and the whole pipeline has been run against real public datasets
 to find out where synthetic results do not hold up.
+
+---
+
+## What Makes This Different
+
+Purchase propensity, lifetime value, and customer segmentation are well-covered ground. Many open
+projects train these models on a single store's clean transaction table. This project differs in
+three ways.
+
+**1. It starts from raw screen text, not a clean table.** Most customer analytics work assumes the
+data already arrives as tidy rows of products, prices, and purchases. Here the input is the noisy
+text a screen reader would capture from a shopping app. Extracting the brand, title, price,
+category, and user action is the first half of the project, and its accuracy limits everything
+downstream.
+
+**2. It follows the shopper across apps.** The same product is linked across Amazon India,
+Amazon US, Flipkart, and Walmart into one canonical ID, so the pipeline can see when a user
+compares a product on several apps and where they finally buy it. That makes possible features
+that a single store cannot compute, such as how spread out a user is across apps, and a model
+that no single store can train: predicting whether the next purchase will move to a different app.
+Public datasets with this shape are rare, which is why the main dataset is simulated.
+
+**3. It is tested against real data, and the failures are recorded.** Synthetic results mostly
+show that the code agrees with its own generator. So the whole pipeline was also run on real
+Amazon listings and a real e-commerce clickstream. Several components that looked strong on
+synthetic data failed there, including brand extraction, category assignment, and segment naming.
+Each failure is documented, fixed, and guarded by a test. See
+[Real-World Validation](#real-world-validation).
 
 ---
 
