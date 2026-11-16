@@ -101,3 +101,19 @@ def test_save_rfm_features_parquet(tmp_path):
     loaded_df = pl.read_parquet(saved_path)
     assert loaded_df.shape == (1, 3)
     assert loaded_df["user_id"][0] == "user_001"
+
+
+def test_user_filter_returns_matching_rows_of_full_result(tiny_warehouse):
+    """Per-user serving features equal the corresponding rows of the batch computation."""
+    from polars.testing import assert_frame_equal
+
+    con = duckdb.connect(str(tiny_warehouse), read_only=True)
+    try:
+        full = compute_rfm_features(reference_date="2026-10-21 00:00:00", con=con)
+        users = full["user_id"].to_list()[:3]
+        part = compute_rfm_features(reference_date="2026-10-21 00:00:00", con=con, user_ids=users)
+        none = compute_rfm_features(reference_date="2026-10-21 00:00:00", con=con, user_ids=["nobody"])
+    finally:
+        con.close()
+    assert_frame_equal(part, full.filter(pl.col("user_id").is_in(users)))
+    assert none.height == 0

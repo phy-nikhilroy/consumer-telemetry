@@ -73,6 +73,25 @@ RECENCY_FEATURES = (
 RECENCY_NULL_SENTINEL_DAYS = 9999.0
 RANDOM_SEED = 42
 
+# Serving. The API writes live events into its own copy of the warehouse so that demo
+# traffic can never leak into the batch warehouse the models are trained from. On first
+# start the serving copy is cloned from DEFAULT_DB_PATH, or simulated if that is absent.
+SERVING_DB_PATH = PROCESSED_DATA_DIR / "serving.duckdb"
+SERVING_SIMULATION_USERS = 400
+SERVING_SIMULATION_DAYS = 30
+# Purchase probability bands reported as risk_segment. The test-set base rate is about
+# 40 percent; at or above 0.6 the top deciles bought at roughly twice that rate, and
+# below 0.3 almost nobody bought (see propensity_evaluation_summary.json).
+PROPENSITY_HIGH_THRESHOLD = 0.6
+PROPENSITY_LOW_THRESHOLD = 0.3
+# Users with fewer events than this are scored, but flagged as low history: real
+# clickstream data showed the feature store says little about sparse visitors.
+LOW_HISTORY_EVENT_THRESHOLD = 20
+CLV_HORIZON_DAYS = 30
+# Warehouse actions are view, cart, and buy. Extracted intents outside that set are
+# stored as views so they still count as engagement without inventing a new funnel step.
+WAREHOUSE_ACTIONS = ("view", "cart", "buy")
+
 
 def rebase_path(default: Path, directory: Optional[Union[str, Path]] = None) -> Path:
     """

@@ -110,3 +110,19 @@ def test_save_behavioral_features_parquet(tmp_path):
     loaded = pl.read_parquet(saved)
     assert loaded.shape == (1, 3)
     assert loaded["user_id"][0] == "user_001"
+
+
+def test_user_filter_returns_matching_rows_of_full_result(tiny_warehouse):
+    """Per-user serving features, cross-app comparisons included, equal the batch rows."""
+    from polars.testing import assert_frame_equal
+
+    con = duckdb.connect(str(tiny_warehouse), read_only=True)
+    try:
+        full = compute_behavioral_features(reference_date="2026-10-21 00:00:00", con=con)
+        users = full.sort("cross_app_comparison_count", descending=True)["user_id"].to_list()[:3]
+        part = compute_behavioral_features(reference_date="2026-10-21 00:00:00", con=con, user_ids=users)
+    finally:
+        con.close()
+    expected = full.filter(pl.col("user_id").is_in(users))
+    assert expected["cross_app_comparison_count"].sum() > 0
+    assert_frame_equal(part, expected)

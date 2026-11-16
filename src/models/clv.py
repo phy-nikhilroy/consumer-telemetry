@@ -22,6 +22,7 @@ Note on the library API: the specification refers to
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 from pathlib import Path
 import sys
@@ -72,17 +73,35 @@ def load_purchase_transactions(
     con: Optional[duckdb.DuckDBPyConnection] = None,
     db_path: Optional[Union[str, Path]] = None,
     usd_to_inr_rate: float = USD_TO_INR_RATE,
+    user_ids: Optional[List[str]] = None,
+    reference_date: Optional[Union[str, datetime]] = None,
 ) -> pl.DataFrame:
     """
     Returns the purchase transaction log with revenue normalized to INR.
 
     Only `buy` events count as transactions; views and cart adds carry no revenue.
+    `user_ids` restricts the log to those users and `reference_date` drops purchases
+    after it. The serving API uses both to value one user as of the current moment; the
+    batch pipeline passes neither and reads the full log.
     """
     should_close = False
     if con is None:
         db_mgr = DatabaseManager(db_path=db_path or DEFAULT_DB_PATH)
         con = db_mgr.get_connection()
         should_close = True
+
+    filters = []
+    params: Dict[str, Any] = {}
+    if user_ids is not None:
+        filters.append("AND user_id IN (SELECT UNNEST($user_ids))")
+        params["user_ids"] = [str(u) for u in user_ids]
+    if reference_date is not None:
+        filters.append("AND timestamp <= CAST($reference_date AS TIMESTAMP)")
+        params["reference_date"] = (
+            reference_date.strftime("%Y-%m-%d %H:%M:%S.%f")
+            if isinstance(reference_date, datetime) else str(reference_date)
+        )
+    filter_sql = "\n              ".join(filters)
 
     try:
         query = f"""
@@ -99,9 +118,11 @@ def load_purchase_transactions(
             WHERE action = 'buy'
               AND price IS NOT NULL
               AND price > 0
+              {filter_sql}
             ORDER BY user_id, timestamp
         """
-        return pl.from_arrow(con.execute(query).to_arrow_table())
+        result = con.execute(query, params) if params else con.execute(query)
+        return pl.from_arrow(result.to_arrow_table())
     finally:
         if should_close:
             con.close()

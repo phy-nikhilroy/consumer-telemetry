@@ -264,3 +264,22 @@ def test_plot_clv_distribution_writes_image(fitted, summary, transactions, tmp_p
     out = plot_clv_distribution(clv, output_path=tmp_path / "clv.png")
     assert out.exists()
     assert out.stat().st_size > 1000
+
+
+def test_load_purchase_transactions_filters_users_and_date(tiny_warehouse):
+    """The serving path loads one user's purchases up to a reference date."""
+    import duckdb
+
+    con = duckdb.connect(str(tiny_warehouse), read_only=True)
+    try:
+        everything = load_purchase_transactions(con=con)
+        user = everything["user_id"][0]
+        cutoff = everything.filter(pl.col("user_id") == user)["timestamp"].sort()[0]
+        one_user = load_purchase_transactions(con=con, user_ids=[user])
+        up_to_first = load_purchase_transactions(con=con, user_ids=[user], reference_date=cutoff)
+    finally:
+        con.close()
+    assert one_user.height == everything.filter(pl.col("user_id") == user).height
+    assert set(one_user["user_id"]) == {user}
+    assert up_to_first.height >= 1
+    assert up_to_first["timestamp"].max() <= cutoff

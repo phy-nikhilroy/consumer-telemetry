@@ -9,7 +9,7 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 # Ensure consumer-telemetry root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -28,12 +28,18 @@ def compute_rfm_features(
     reference_date: Union[str, datetime],
     con: Optional[duckdb.DuckDBPyConnection] = None,
     db_path: Optional[Union[str, Path]] = None,
-    usd_to_inr_rate: float = USD_TO_INR_RATE
+    usd_to_inr_rate: float = USD_TO_INR_RATE,
+    user_ids: Optional[Sequence[str]] = None,
 ) -> pl.DataFrame:
     """
     Computes 15+ Recency, Frequency, and Monetary features per user.
     All aggregations are strictly bounded by reference_date (timestamp <= reference_date)
     to prevent target data leakage in predictive modeling.
+
+    `user_ids` restricts the computation to those users. The serving API uses it to score
+    one user with exactly the SQL the models were trained on, rather than a reimplementation
+    that could drift from it. Every feature is a per-user aggregate, so the restricted
+    result equals the matching rows of the unrestricted one.
     """
     if isinstance(reference_date, datetime):
         ref_str = reference_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -45,6 +51,9 @@ def compute_rfm_features(
         db_mgr = DatabaseManager(db_path=db_path or DEFAULT_DB_PATH)
         con = db_mgr.get_connection()
         should_close = True
+
+    user_filter = "AND user_id IN (SELECT UNNEST($user_ids))" if user_ids is not None else ""
+    params = {"user_ids": [str(u) for u in user_ids]} if user_ids is not None else None
 
     try:
         query = f"""
@@ -63,6 +72,7 @@ def compute_rfm_features(
                     END AS norm_price
                 FROM fact_events
                 WHERE timestamp <= CAST('{ref_str}' AS TIMESTAMP)
+                {user_filter}
             ),
             user_aggs AS (
                 SELECT
@@ -97,7 +107,8 @@ def compute_rfm_features(
             )
             SELECT * FROM user_aggs ORDER BY user_id
         """
-        arrow_table = con.execute(query).to_arrow_table()
+        result = con.execute(query, params) if params is not None else con.execute(query)
+        arrow_table = result.to_arrow_table()
         df = pl.from_arrow(arrow_table)
         return df
     finally:

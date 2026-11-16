@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import math
 from pathlib import Path
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 # Ensure consumer-telemetry root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -29,12 +29,17 @@ def compute_behavioral_features(
     reference_date: Union[str, datetime],
     con: Optional[duckdb.DuckDBPyConnection] = None,
     db_path: Optional[Union[str, Path]] = None,
-    usd_to_inr_rate: float = USD_TO_INR_RATE
+    usd_to_inr_rate: float = USD_TO_INR_RATE,
+    user_ids: Optional[Sequence[str]] = None,
 ) -> pl.DataFrame:
     """
     Computes 15+ behavioral and cross-app features per user.
     All calculations are strictly bounded by reference_date (timestamp <= reference_date)
     to prevent target leakage.
+
+    `user_ids` restricts the computation to those users, for per-user scoring at serving
+    time. Every feature is a per-user aggregate, so the restricted result equals the
+    matching rows of the unrestricted one.
     """
     if isinstance(reference_date, datetime):
         ref_str = reference_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -46,6 +51,10 @@ def compute_behavioral_features(
         db_mgr = DatabaseManager(db_path=db_path or DEFAULT_DB_PATH)
         con = db_mgr.get_connection()
         should_close = True
+
+    event_filter = "AND fe.user_id IN (SELECT UNNEST($user_ids))" if user_ids is not None else ""
+    comparison_filter = "AND user_id IN (SELECT UNNEST($user_ids))" if user_ids is not None else ""
+    params = {"user_ids": [str(u) for u in user_ids]} if user_ids is not None else None
 
     try:
         query = f"""
@@ -69,6 +78,7 @@ def compute_behavioral_features(
                 FROM fact_events fe
                 LEFT JOIN dim_products dp ON fe.canonical_product_id = dp.canonical_product_id
                 WHERE fe.timestamp <= CAST('{ref_str}' AS TIMESTAMP)
+                {event_filter}
             ),
             app_counts AS (
                 SELECT user_id, app_name, COUNT(*) AS app_events
@@ -129,6 +139,7 @@ def compute_behavioral_features(
                     COUNT(*) AS cross_app_comparison_count
                 FROM fact_cross_app_comparisons
                 WHERE first_viewed <= CAST('{ref_str}' AS TIMESTAMP)
+                {comparison_filter}
                 GROUP BY user_id
             ),
             user_features AS (
@@ -211,7 +222,8 @@ def compute_behavioral_features(
             )
             SELECT * FROM user_features ORDER BY user_id
         """
-        arrow_table = con.execute(query).to_arrow_table()
+        result = con.execute(query, params) if params is not None else con.execute(query)
+        arrow_table = result.to_arrow_table()
         df = pl.from_arrow(arrow_table)
         return df
     finally:
