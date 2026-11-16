@@ -12,7 +12,7 @@ import json
 import random
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Product catalogs across categories
 CATALOG = [
@@ -237,6 +237,59 @@ def _format_inr(val: float) -> str:
     if first:
         parts.insert(0, first)
     return ",".join(parts) + "," + rest
+
+
+def generate_app_screen_text(
+    catalog_item: dict,
+    app: str,
+    action: str,
+    discount_pct: int,
+    rating: float,
+    rng: Optional[random.Random] = None,
+) -> str:
+    """
+    Creates realistic noisy screen text for one product on one app.
+
+    Used by the behavioral simulator for warehouse events and by the live stream
+    generator for API traffic, so both produce text in the same layout. `rng` defaults
+    to the module-level random generator, which keeps the simulator's seeded output
+    unchanged; the stream generator passes its own seeded instance.
+    """
+    source: Any = rng if rng is not None else random
+    brand = catalog_item["brand"]
+    title = catalog_item["title"]
+    specs = " ".join(catalog_item.get("specs", []))
+    currency = "INR" if app in ["amazon_in", "flipkart"] else "USD"
+
+    base_price = catalog_item["base_inr"] if currency == "INR" else catalog_item["base_usd"]
+    final_price = base_price * (1.0 - discount_pct / 100.0)
+
+    if currency == "INR":
+        price_str = f"₹{_format_inr(final_price)}"
+        mrp_str = f"M.R.P: ₹{_format_inr(base_price)}" if discount_pct > 0 else ""
+    else:
+        price_str = f"${final_price:.2f}"
+        mrp_str = f"List: ${base_price:.2f}" if discount_pct > 0 else ""
+
+    action_text = {
+        "view": "In stock",
+        "cart": "Add to Cart",
+        "buy": "Buy Now"
+    }.get(action, "In stock")
+
+    components = [
+        "Sponsored" if source.random() < 0.25 else "",
+        f"{rating:.1f}★",
+        f"({source.randint(100, 50000)})",
+        brand,
+        title,
+        specs,
+        price_str,
+        mrp_str,
+        f"({discount_pct}% off)" if discount_pct > 0 else "",
+        action_text,
+    ]
+    return " ".join(c for c in components if c).strip()
 
 
 def generate_single_sample(sample_id: int) -> Dict[str, Any]:
