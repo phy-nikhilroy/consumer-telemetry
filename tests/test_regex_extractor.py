@@ -150,3 +150,34 @@ def test_extract_price_multiple_discounts_picks_match():
     res = extract_price(text)
     assert res["price"] == 6995.0
     assert res["discount_pct"] == 30
+
+
+@pytest.mark.parametrize(
+    "text, expected_price, expected_currency",
+    [
+        ("Samsung Galaxy S24 Ultra 256GB Titanium $1299.99 4.7★ Add to Cart", 1299.99, "USD"),
+        ("Sony Bravia 55 inch $12999", 12999.0, "USD"),
+        ("OnePlus Nord CE ₹15999", 15999.0, "INR"),
+        ("Boat Rockerz Rs. 2499", 2499.0, "INR"),
+    ],
+)
+def test_extract_price_without_thousands_separator(text, expected_price, expected_currency):
+    # Regression: the grouped branch of the price pattern once matched only the first three
+    # digits of an unseparated price, so "$1299.99" was read as 129.0.
+    res = extract_price(text)
+    assert res["price"] == expected_price
+    assert res["currency"] == expected_currency
+
+
+def test_extract_price_separated_formats_unchanged():
+    assert extract_price("$1,299.99")["price"] == 1299.99
+    assert extract_price("₹15,999")["price"] == 15999.0
+    assert extract_price("₹1,23,456")["price"] == 123456.0
+    assert extract_price("$22.90")["price"] == 22.9
+
+
+def test_extract_price_unseparated_mrp_and_selling_price():
+    res = extract_price("List Price: $1499.00 $1299.99")
+    assert res["price"] == 1299.99
+    assert res["mrp"] == 1499.0
+    assert res["discount_pct"] == 13

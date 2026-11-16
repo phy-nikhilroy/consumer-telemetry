@@ -8,8 +8,11 @@ from typing import Any, Dict, Optional
 CURRENCY_INR_PATTERN = re.compile(r"(?:₹|\bRs\.?|\bINR\b)", re.IGNORECASE)
 CURRENCY_USD_PATTERN = re.compile(r"(?:\$|\bUSD\b)", re.IGNORECASE)
 
-# Price numeric pattern: e.g. 1,23,456 or 123,456.78 or 1234
-NUMERIC_PRICE_RE = r"\d{1,3}(?:,\d{2,3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?"
+# Price numeric pattern: e.g. 1,23,456 or 123,456.78 or 1234 or 1299.99
+# The grouped branch requires at least one comma group. When it allowed zero groups it
+# matched the first three digits of an unseparated price ("$1299.99" read as 129.0),
+# and the regex engine never fell through to the plain-digits branch.
+NUMERIC_PRICE_RE = r"\d{1,3}(?:,\d{2,3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?"
 
 # Discount pattern: e.g. 10% off, 72% OFF, (15% off), save 20%
 DISCOUNT_PATTERN = re.compile(r"(?:(?:save\s+)?(\d{1,2})%\s*off|\b(\d{1,2})%\s*savings?\b)", re.IGNORECASE)
