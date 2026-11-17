@@ -33,6 +33,12 @@ USD_TO_INR_RATE = 83.0
 DEFAULT_SESSION_INACTIVITY_MINUTES = 30.0
 DEFAULT_CROSS_APP_WINDOW_MINUTES = 60.0
 
+# Temporal split. Every train target window (ref, ref + window] must end at or before the
+# test reference date, so no train label ever observes an event the test labels observe.
+PREDICTION_WINDOW_DAYS = 7
+TRAIN_REFERENCE_DATES = ("2026-10-06 00:00:00", "2026-10-13 00:00:00")
+TEST_REFERENCE_DATE = "2026-10-20 00:00:00"
+
 # Model artifacts
 MODELS_DIR = PROJECT_ROOT / "src" / "models"
 ARTIFACTS_DIR = MODELS_DIR / "artifacts"

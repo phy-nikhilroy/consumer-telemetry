@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import sys
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 # Ensure consumer-telemetry root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -24,10 +24,13 @@ import polars as pl
 
 from src.config import (
     DEFAULT_DB_PATH,
+    PREDICTION_WINDOW_DAYS,
     RECENCY_FEATURES,
     RECENCY_NULL_SENTINEL_DAYS,
     TRAIN_FEATURES_PATH,
     TEST_FEATURES_PATH,
+    TEST_REFERENCE_DATE,
+    TRAIN_REFERENCE_DATES,
     SELECTED_FEATURES_PATH,
     rebase_path,
 )
@@ -37,6 +40,58 @@ from src.features.behavioral_features import compute_behavioral_features
 
 DEFAULT_TRAIN_PATH = TRAIN_FEATURES_PATH
 DEFAULT_TEST_PATH = TEST_FEATURES_PATH
+
+# Columns that identify a row or hold a forward target; never model inputs.
+NON_FEATURE_COLUMNS = frozenset({
+    "user_id",
+    "reference_date",
+    "will_purchase_next_7d",
+    "num_purchases_next_7d",
+    "will_switch_app_next_7d",
+    "top_category_l1",
+})
+
+
+def _parse_ref(value: Union[str, datetime]) -> datetime:
+    """Parses a reference date string (or passes a datetime through)."""
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value).strip())
+
+
+def validate_split(
+    train_ref_dates: Sequence[str],
+    test_ref_date: str,
+    prediction_window_days: int = PREDICTION_WINDOW_DAYS,
+    max_event_timestamp: Optional[datetime] = None,
+) -> None:
+    """
+    Raises ValueError unless the temporal split is leak free.
+
+    Requires (a) at least one train reference date, (b) every train target window
+    `(r, r + window]` to end at or before the test reference date, and (c) when
+    `max_event_timestamp` is given, the test target window to end at or before the last
+    observed event, so test labels are not silently truncated by the end of the data.
+    """
+    refs = list(train_ref_dates)
+    if not refs:
+        raise ValueError("train_ref_dates must contain at least one reference date")
+    window = timedelta(days=prediction_window_days)
+    test_ref = _parse_ref(test_ref_date)
+    for raw in refs:
+        ref = _parse_ref(raw)
+        if ref + window > test_ref:
+            raise ValueError(
+                f"train target window ({ref} -> {ref + window}) overlaps the test "
+                f"reference date {test_ref}"
+            )
+    if max_event_timestamp is not None:
+        data_end = _parse_ref(max_event_timestamp)
+        if test_ref + window > data_end:
+            raise ValueError(
+                f"test target window ends at {test_ref + window}, after the last event "
+                f"{data_end}"
+            )
 
 
 def compute_target_variables(
@@ -146,9 +201,9 @@ def build_feature_matrix(
 
 
 def generate_train_test_datasets(
-    train_ref_date: str = "2026-10-18 00:00:00",
-    test_ref_date: str = "2026-10-21 00:00:00",
-    prediction_window_days: int = 7,
+    train_ref_dates: Sequence[str] = TRAIN_REFERENCE_DATES,
+    test_ref_date: str = TEST_REFERENCE_DATE,
+    prediction_window_days: int = PREDICTION_WINDOW_DAYS,
     train_path: Optional[Union[str, Path]] = None,
     test_path: Optional[Union[str, Path]] = None,
     db_path: Optional[Union[str, Path]] = None,
@@ -157,27 +212,49 @@ def generate_train_test_datasets(
     """
     Constructs temporal train and test splits to strictly prevent data leakage.
 
-    With the default synthetic reference dates the train target window covers days 21
-    to 27 of the simulation and the test window days 24 to 30. `features_dir` redirects
-    both matrices to another directory; explicit `train_path` and `test_path` win over it.
+    The train matrix stacks one feature matrix per train reference date, so a user appears
+    once per reference date; the `reference_date` column tells the rows apart, and grouped
+    validation keys on `user_id` (see `get_modeling_groups`). The split is
+    validated against the warehouse's last event before anything is built or written.
+    `features_dir` redirects both matrices to another directory; explicit `train_path` and
+    `test_path` win over it.
     """
+    if isinstance(train_ref_dates, str):
+        train_ref_dates = [train_ref_dates]
+    train_refs = [str(r).strip() for r in train_ref_dates]
+    test_ref = str(test_ref_date).strip()
+
     db_mgr = DatabaseManager(db_path=db_path or DEFAULT_DB_PATH)
     con = db_mgr.get_connection()
 
     try:
-        print(f"Building TRAIN feature matrix (reference_date: {train_ref_date})...")
-        train_df = build_feature_matrix(
-            reference_date=train_ref_date,
+        max_event = con.execute("SELECT MAX(timestamp) FROM fact_events").fetchone()[0]
+        if max_event is None:
+            raise ValueError("fact_events is empty; cannot build a temporal split")
+        validate_split(
+            train_refs,
+            test_ref,
             prediction_window_days=prediction_window_days,
-            con=con,
+            max_event_timestamp=max_event,
         )
 
-        print(f"Building TEST feature matrix (reference_date: {test_ref_date})...")
+        blocks = []
+        for ref in train_refs:
+            print(f"Building TRAIN feature matrix (reference_date: {ref})...")
+            block = build_feature_matrix(
+                reference_date=ref,
+                prediction_window_days=prediction_window_days,
+                con=con,
+            )
+            blocks.append(block.with_columns(pl.lit(ref, dtype=pl.Utf8).alias("reference_date")))
+        train_df = pl.concat(blocks, how="vertical")
+
+        print(f"Building TEST feature matrix (reference_date: {test_ref})...")
         test_df = build_feature_matrix(
-            reference_date=test_ref_date,
+            reference_date=test_ref,
             prediction_window_days=prediction_window_days,
             con=con,
-        )
+        ).with_columns(pl.lit(test_ref, dtype=pl.Utf8).alias("reference_date"))
 
         t_out = Path(train_path) if train_path else rebase_path(DEFAULT_TRAIN_PATH, features_dir)
         te_out = Path(test_path) if test_path else rebase_path(DEFAULT_TEST_PATH, features_dir)
@@ -194,8 +271,8 @@ def generate_train_test_datasets(
         print_target_distributions(
             train_df,
             test_df,
-            train_ref_date=train_ref_date,
-            test_ref_date=test_ref_date,
+            train_ref_date=", ".join(train_refs) if len(train_refs) > 1 else train_refs[0],
+            test_ref_date=test_ref,
             prediction_window_days=prediction_window_days,
         )
 
@@ -205,11 +282,17 @@ def generate_train_test_datasets(
 
 
 def _window_label(prefix: str, ref_date: Optional[str], window_days: int) -> str:
-    """Formats a split header from its real reference date and target window."""
+    """
+    Formats a split header from its real reference dates and target window.
+
+    `ref_date` may list several comma-separated dates (a stacked train matrix); the label
+    then spans the first window's start to the last window's end.
+    """
     if not ref_date:
         return prefix
-    start = datetime.fromisoformat(str(ref_date).strip())
-    end = start + timedelta(days=window_days)
+    refs = sorted(_parse_ref(part) for part in str(ref_date).split(",") if part.strip())
+    start = refs[0]
+    end = refs[-1] + timedelta(days=window_days)
     return f"{prefix} ({start:%Y-%m-%d} -> {end:%Y-%m-%d})"
 
 
@@ -338,8 +421,7 @@ def get_modeling_matrices(
             selected_info = json.load(f)
         feature_names = [f for f in selected_info["selected_features"] if f in df.columns]
     else:
-        ignore = {"user_id", "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d", "top_category_l1"}
-        feature_names = [c for c in df.columns if c not in ignore]
+        feature_names = [c for c in df.columns if c not in NON_FEATURE_COLUMNS]
 
     X = fill_missing_features(df, feature_names).to_numpy().astype(np.float32)
     y = df[target_col].to_numpy()
@@ -347,17 +429,36 @@ def get_modeling_matrices(
     return X, y, feature_names
 
 
+def get_modeling_groups(
+    split: str = "train",
+    features_dir: Optional[Union[str, Path]] = None,
+) -> np.ndarray:
+    """
+    Returns the `user_id` column of a split in row order.
+
+    The train matrix holds one row per user per reference date, so grouped cross-validation
+    must keep all of a user's rows in the same fold; these ids are the groups.
+    """
+    default = TRAIN_FEATURES_PATH if split == "train" else TEST_FEATURES_PATH
+    path = rebase_path(default, features_dir)
+    if not Path(path).exists():
+        raise FileNotFoundError(f"Feature matrix not found at {path}")
+    return pl.read_parquet(path, columns=["user_id"])["user_id"].to_numpy()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Assemble feature store and temporal train/test datasets.")
-    parser.add_argument("--train-ref", type=str, default="2026-10-18 00:00:00", help="Train reference date")
-    parser.add_argument("--test-ref", type=str, default="2026-10-21 00:00:00", help="Test reference date")
+    parser.add_argument("--train-ref", type=str, nargs="+", default=list(TRAIN_REFERENCE_DATES),
+                        help="One or more train reference dates")
+    parser.add_argument("--test-ref", type=str, default=TEST_REFERENCE_DATE,
+                        help="Test reference date")
     parser.add_argument("--db-path", type=str, default=None, help="Warehouse to read (default: synthetic)")
     parser.add_argument("--features-dir", type=str, default=None,
                         help="Directory for the train and test matrices (default: data/features)")
     args = parser.parse_args()
 
     generate_train_test_datasets(
-        train_ref_date=args.train_ref,
+        train_ref_dates=args.train_ref,
         test_ref_date=args.test_ref,
         db_path=args.db_path,
         features_dir=args.features_dir,

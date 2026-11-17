@@ -192,23 +192,22 @@ def test_targets_ignore_events_at_or_before_the_reference_date():
 
 def test_train_and_test_target_windows_do_not_overlap():
     """
-    Verifies the two splits' prediction windows are separated in time.
+    Verifies every train prediction window ends at or before the test reference date.
 
     Overlapping windows would let the same future purchase appear as a label in both
     splits, inflating test metrics without any feature leaking at all.
     """
-    train_ref = datetime.fromisoformat(TRAIN_REFERENCE_DATE)
-    test_ref = datetime.fromisoformat(TEST_REFERENCE_DATE)
+    from src.config import (
+        PREDICTION_WINDOW_DAYS as WINDOW,
+        TEST_REFERENCE_DATE as TEST_REF,
+        TRAIN_REFERENCE_DATES,
+    )
 
-    assert test_ref > train_ref, "Test reference date must be later than train"
-
-    train_window_end = train_ref + timedelta(days=PREDICTION_WINDOW_DAYS)
-    test_window_end = test_ref + timedelta(days=PREDICTION_WINDOW_DAYS)
-
-    # The test window must extend past the training window, so the test split is
-    # genuinely evaluating on later outcomes.
-    assert test_window_end > train_window_end
-    assert test_ref >= train_ref
+    test_ref = datetime.fromisoformat(TEST_REF)
+    window = timedelta(days=WINDOW)
+    assert len(TRAIN_REFERENCE_DATES) >= 1
+    for train_ref in TRAIN_REFERENCE_DATES:
+        assert datetime.fromisoformat(train_ref) + window <= test_ref
 
 
 def test_train_and_test_targets_actually_differ(train, test_matrix):

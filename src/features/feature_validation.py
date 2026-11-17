@@ -81,7 +81,7 @@ def analyze_correlations_and_redundancy(
     """
     feature_cols = [
         c for c in df.columns
-        if c not in ["user_id", "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d", "top_category_l1"]
+        if c not in ["user_id", "reference_date", "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d", "top_category_l1"]
     ]
 
     # Nulls are filled exactly as the modeling matrices fill them, so selection judges
@@ -119,7 +119,7 @@ def compute_feature_importances(
     """
     feature_cols = [
         c for c in df.columns
-        if c not in ["user_id", "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d", "top_category_l1"]
+        if c not in ["user_id", "reference_date", "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d", "top_category_l1"]
     ]
 
     X = fill_missing_features(df, feature_cols).to_pandas()

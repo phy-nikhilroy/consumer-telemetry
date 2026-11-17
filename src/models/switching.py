@@ -111,6 +111,7 @@ def load_selected_feature_names(
 
     ignore = {
         "user_id",
+        "reference_date",
         "top_category_l1",
         "will_purchase_next_7d",
         "num_purchases_next_7d",

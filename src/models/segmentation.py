@@ -160,6 +160,12 @@ def load_segmentation_data(
         raise FileNotFoundError(f"Feature matrix not found at {path}")
 
     df = pl.read_parquet(path)
+    # The train matrix stacks one block per train reference date, so a user appears once
+    # per date. Segmentation needs one row per user describing who they are now, so it
+    # keeps only the latest reference date: the most recent history available in the file.
+    if "reference_date" in df.columns:
+        latest = df["reference_date"].max()
+        df = df.filter(pl.col("reference_date") == latest)
     available = [c for c in SEGMENTATION_FEATURES if c in df.columns]
     selected = df.select(["user_id"] + available)
 
