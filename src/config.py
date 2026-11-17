@@ -161,3 +161,26 @@ PRICE_TIERS: Dict[str, Tuple[float, float]] = {
 # {0.50, 0.55, ..., 0.95} that maximises F1 on tune-family pairs; see
 # reports/v1_2_entity_resolution.json.
 ENTITY_MATCH_THRESHOLD = 0.50
+
+
+# Supervised taxonomy (src/ingestion/taxonomy_train.py). A label is `<categories[0]> > <first
+# later node that is not an audience>`, so fashion is labelled by product type (Shoes,
+# Clothing) rather than by Women or Men. Rows whose product node is a merchandising or store
+# node are dropped. A label needs TAXONOMY_MIN_LABEL_ROWS train rows to be kept.
+TAXONOMY_AUDIENCE_NODES = frozenset({"Women", "Men", "Girls", "Boys", "Baby", "Novelty & More"})
+TAXONOMY_NON_PRODUCT_NODES = frozenset({
+    "Wireless Trade-In Buy Box Widget", "Electronics Warranties", "Westlake", "Boot Shop",
+})
+TAXONOMY_ARTIFACT_PATH = PROJECT_ROOT / "src" / "ingestion" / "artifacts" / "taxonomy_lr.joblib"
+TAXONOMY_ENCODER_NAME = "all-MiniLM-L6-v2"
+TAXONOMY_MIN_LABEL_ROWS = 300
+TAXONOMY_MAX_ROWS_PER_LABEL = 3_000
+TAXONOMY_MAX_TRAIN_ROWS = 60_000
+# Rows of the tune split sampled to choose the abstention threshold tau.
+TAXONOMY_TUNE_ROWS = 20_000
+# tau is the smallest grid value whose confident tune rows reach this accuracy. The plan set
+# 0.90; on the real shards that forces 87 percent abstention against gate G1.2-03's 50
+# percent ceiling, so the user chose 0.85 (2026-11-18, recorded in v2_execution_log.md).
+TAXONOMY_TARGET_ACCURACY = 0.85
+TAXONOMY_TAU_GRID = tuple(round(0.05 * i, 2) for i in range(1, 20))
+TAXONOMY_TAU_FALLBACK = 0.95

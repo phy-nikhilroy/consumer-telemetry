@@ -15,8 +15,7 @@ def test_process_structure():
     assert prod.price == 68330.0
     assert prod.currency == "INR"
     assert prod.action == "buy"
-    assert prod.category_l1 == "Electronics"
-    assert prod.category_l2 == "Smartphones"
+    assert prod.category_l2 != "Unknown"
     assert prod.extraction_confidence >= 0.80
 
 
@@ -149,3 +148,25 @@ def test_process_screen_marks_exactly_one_focal_product() -> None:
 
 def test_process_defaults_is_focal_false() -> None:
     assert process("Apple iPhone 15 $799 Buy Now").is_focal is False
+
+
+def _catalog_category(item: dict) -> tuple:
+    text = f"{item['brand']} {item['title']} {' '.join(item.get('specs', []))} $99.99 4.5★ Add to Cart"
+    prod = process(text)
+    return prod.category_l1, prod.category_l2
+
+
+def test_catalog_categories_are_structurally_consistent():
+    """
+    Verifies the catalog's categories keep their structure under the supervised taxonomy,
+    whose label names differ from v1.0: all smartphones share one category_l2, all shoes
+    share one category_l1, and the two differ.
+    """
+    phones = {_catalog_category(i) for i in CATALOG if i["category"] == "Smartphones"}
+    shoes = {_catalog_category(i) for i in CATALOG if i["category"] == "Footwear"}
+    assert sum(1 for i in CATALOG if i["category"] == "Smartphones") == 6
+    assert sum(1 for i in CATALOG if i["category"] == "Footwear") == 3
+    assert len({l2 for _, l2 in phones}) == 1
+    assert len({l1 for l1, _ in shoes}) == 1
+    assert next(iter(phones))[1] not in {l2 for _, l2 in shoes}
+    assert all("Unknown" not in pair for pair in phones | shoes)

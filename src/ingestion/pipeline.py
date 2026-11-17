@@ -26,7 +26,7 @@ from src.ingestion.ner_extractor import (
     extract_product_title,
     extract_specs,
 )
-from src.ingestion.taxonomy_classifier import classify_product
+from src.ingestion.taxonomy_classifier import METHOD_SUPERVISED, classify_product
 from src.ingestion.entity_resolver import compute_canonical_key, compute_canonical_name
 from src.ingestion.segmenter import segment_screen
 
@@ -95,13 +95,16 @@ PRICE_VERIFIED_EVIDENCE = 1.0
 PRICE_UNVERIFIED_EVIDENCE = 0.7
 
 
-def category_evidence(similarity: float, abstained: bool) -> float:
+def category_evidence(similarity: float, abstained: bool, method: Optional[str] = None) -> float:
     """
-    Maps taxonomy similarity onto [0, 1]: zero at or below the abstain floor, rising
-    linearly to one at `TAXONOMY_CONFIDENT_SIMILARITY`.
+    Maps the taxonomy score onto [0, 1]. A supervised-model answer is already a probability
+    and is used as it is. A prototype similarity is zero at or below the abstain floor and
+    rises linearly to one at `TAXONOMY_CONFIDENT_SIMILARITY`.
     """
     if abstained:
         return 0.0
+    if method == METHOD_SUPERVISED:
+        return float(min(1.0, max(0.0, similarity)))
     span = TAXONOMY_CONFIDENT_SIMILARITY - TAXONOMY_MIN_SIMILARITY
     if span <= 0:
         return 1.0
@@ -126,7 +129,7 @@ def calculate_extraction_confidence(extracted: Dict[str, Any]) -> float:
 
     Recognized keys: `brand`, `brand_source`, `product_title`, `price`,
     `price_verified`, `currency`, `rating`, `category_l2`, `category_similarity`,
-    and `category_abstained`.
+    `category_abstained`, and `category_method`.
     """
     score = 0.0
 
@@ -148,7 +151,7 @@ def calculate_extraction_confidence(extracted: Dict[str, Any]) -> float:
     category = extracted.get("category_l2")
     abstained = bool(extracted.get("category_abstained")) or not category or category == "Unknown"
     score += CONFIDENCE_WEIGHTS["category"] * category_evidence(
-        float(extracted.get("category_similarity") or 0.0), abstained
+        float(extracted.get("category_similarity") or 0.0), abstained, extracted.get("category_method")
     )
 
     return round(score, 4)
@@ -208,6 +211,7 @@ def process(
         "category_l2": taxonomy_info.get("category_l2"),
         "category_similarity": category_similarity,
         "category_abstained": taxonomy_info.get("abstained", False),
+        "category_method": taxonomy_info.get("method"),
     }
     confidence = calculate_extraction_confidence(extraction_data)
 
