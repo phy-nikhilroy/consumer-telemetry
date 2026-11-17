@@ -31,7 +31,7 @@ import polars as pl
 
 from src.features.database import DatabaseManager, DEFAULT_DB_PATH
 from src.ingestion.pipeline import process
-from src.config import USD_TO_INR_RATE
+from src.config import RANDOM_SEED, USD_TO_INR_RATE
 from src.ingestion.synthetic_data import CATALOG, _format_inr, generate_app_screen_text
 
 # 5 User Behavioral Archetypes
@@ -551,11 +551,12 @@ def run_simulation(
     num_users: int = 400,
     days: int = 30,
     db_path: Optional[str] = None,
-    output_parquet: str = "data/processed/simulated_events.parquet"
+    output_parquet: str = "data/processed/simulated_events.parquet",
+    seed: int = RANDOM_SEED,
 ) -> Dict[str, Any]:
-    """Generates dataset and reloads DuckDB."""
+    """Generates the dataset for `seed` and reloads the DuckDB warehouse at `db_path`."""
     print(f"Simulating {num_users} users over {days} days...")
-    events, profiles = simulate_events_dataset(num_users=num_users, days=days)
+    events, profiles = simulate_events_dataset(num_users=num_users, days=days, seed=seed)
     print(f"Generated {len(events)} events across 5 archetypes.")
 
     # Save to parquet
@@ -582,6 +583,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simulate user shopping telemetry across archetypes.")
     parser.add_argument("--users", type=int, default=400, help="Number of users to simulate (default: 400)")
     parser.add_argument("--days", type=int, default=30, help="Number of days to simulate (default: 30)")
+    parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Simulation seed (default: RANDOM_SEED)")
+    parser.add_argument("--db-path", type=str, default=None, help="Warehouse to rebuild (default: batch warehouse)")
+    parser.add_argument("--output-parquet", type=str, default="data/processed/simulated_events.parquet",
+                        help="Where to write the simulated events")
     args = parser.parse_args()
 
-    run_simulation(num_users=args.users, days=args.days)
+    run_simulation(num_users=args.users, days=args.days, db_path=args.db_path,
+                   output_parquet=args.output_parquet, seed=args.seed)
