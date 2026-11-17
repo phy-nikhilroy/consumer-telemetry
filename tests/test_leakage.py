@@ -233,3 +233,69 @@ def test_feature_values_differ_across_reference_dates(train, test_matrix):
         assert not np.array_equal(left, right), (
             f"{column} is identical across splits, so features were not recomputed"
         )
+
+
+def test_clv_bgnbd_params_unchanged_when_events_after_cutoff_deleted(tmp_path):
+    """Deleting every event after the CLV reference date leaves fitted BG/NBD parameters unchanged."""
+    import shutil
+
+    from src.models.clv import build_rfm_summary, fit_bgnbd, load_purchase_transactions
+    from tests.test_clv_validation import CAL_END, _build_warehouse
+
+    full = _build_warehouse(tmp_path / "full.duckdb", seed=11)
+    trimmed = tmp_path / "trimmed.duckdb"
+    shutil.copy2(full, trimmed)
+    con = duckdb.connect(str(trimmed))
+    con.execute(f"DELETE FROM fact_events WHERE timestamp > TIMESTAMP '{CAL_END}'")
+    con.close()
+
+    def fit(db):
+        tx = load_purchase_transactions(db_path=db, reference_date=CAL_END)
+        return fit_bgnbd(build_rfm_summary(tx, observation_period_end=CAL_END)).params_
+
+    a, b = fit(full), fit(trimmed)
+    for key in a.index:
+        assert a[key] == pytest.approx(b[key], rel=1e-9, abs=1e-12)
+
+
+def test_clv_pipeline_params_unchanged_when_events_after_reference_date_deleted(tmp_path):
+    """run_clv_pipeline with a reference_date fits identical models on the trimmed warehouse."""
+    import shutil
+
+    from src.models.clv import run_clv_pipeline
+    from tests.test_clv_validation import CAL_END, _build_warehouse
+
+    full = _build_warehouse(tmp_path / "full.duckdb", seed=13)
+    trimmed = tmp_path / "trimmed.duckdb"
+    shutil.copy2(full, trimmed)
+    con = duckdb.connect(str(trimmed))
+    con.execute(f"DELETE FROM fact_events WHERE timestamp > TIMESTAMP '{CAL_END}'")
+    con.close()
+
+    a = run_clv_pipeline(db_path=full, reference_date=CAL_END,
+                         features_dir=tmp_path / "fa", artifacts_dir=tmp_path / "aa")
+    b = run_clv_pipeline(db_path=trimmed, reference_date=CAL_END,
+                         features_dir=tmp_path / "fb", artifacts_dir=tmp_path / "ab")
+    for key in a["bgnbd_params"]:
+        assert a["bgnbd_params"][key] == pytest.approx(b["bgnbd_params"][key], rel=1e-9)
+    assert a["n_transactions"] == b["n_transactions"]
+
+
+def test_clv_holdout_fit_unchanged_when_events_after_calibration_end_deleted(tmp_path):
+    """evaluate_clv_holdout fits BG/NBD and Gamma-Gamma on calibration data only."""
+    import shutil
+
+    from src.models.clv_validation import evaluate_clv_holdout
+    from tests.test_clv_validation import CAL_END, _build_warehouse
+
+    full = _build_warehouse(tmp_path / "full.duckdb", seed=17)
+    trimmed = tmp_path / "trimmed.duckdb"
+    shutil.copy2(full, trimmed)
+    con = duckdb.connect(str(trimmed))
+    con.execute(f"DELETE FROM fact_events WHERE timestamp > TIMESTAMP '{CAL_END}'")
+    con.close()
+    a = evaluate_clv_holdout(full, CAL_END, 9)
+    b = evaluate_clv_holdout(trimmed, CAL_END, 9)
+    for key in a["bgnbd_params"]:
+        assert a["bgnbd_params"][key] == pytest.approx(b["bgnbd_params"][key], rel=1e-9)
+    assert a["n_customers"] == b["n_customers"]

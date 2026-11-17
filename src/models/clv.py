@@ -51,6 +51,7 @@ from src.config import (
     CLV_GAMMAGAMMA_PATH,
     DEFAULT_DB_PATH,
     PROCESSED_DATA_DIR,
+    TEST_REFERENCE_DATE,
     USD_TO_INR_RATE,
     USER_CLV_PATH,
     rebase_path,
@@ -390,9 +391,14 @@ def run_clv_pipeline(
     features_dir: Optional[Union[str, Path]] = None,
     artifacts_dir: Optional[Union[str, Path]] = None,
     archetype_events_path: Optional[Union[str, Path]] = None,
+    reference_date: Optional[str] = TEST_REFERENCE_DATE,
 ) -> Dict[str, Any]:
     """
     Fits both CLV models, writes predictions, and prints the ranked user readout.
+
+    Only purchases at or before `reference_date` are used, and customer age `T` is
+    measured to it, so CLV sees exactly the history the propensity test matrix sees.
+    `None` uses the full log up to its last purchase.
 
     `features_dir` and `artifacts_dir` redirect the prediction table and the model
     artifacts to another dataset's directories. Simulator archetypes are joined only
@@ -403,12 +409,13 @@ def run_clv_pipeline(
     bgnbd_path = rebase_path(CLV_BGNBD_PATH, artifacts_dir)
     gamma_gamma_path = rebase_path(CLV_GAMMAGAMMA_PATH, artifacts_dir)
     summary_out = rebase_path(CLV_SUMMARY_PATH, artifacts_dir)
-    print("Loading purchase transaction log from the warehouse...")
-    transactions = load_purchase_transactions(db_path=db_path)
+    print(f"Loading purchase transaction log from the warehouse "
+          f"(reference date: {reference_date or 'none, full log'})...")
+    transactions = load_purchase_transactions(db_path=db_path, reference_date=reference_date)
     print(f"  {transactions.height} purchase transactions "
           f"across {transactions['user_id'].n_unique()} users")
 
-    summary = build_rfm_summary(transactions)
+    summary = build_rfm_summary(transactions, observation_period_end=reference_date)
     repeat_count = int(((summary["frequency"] > 0) & (summary["monetary_value"] > 0)).sum())
     print(f"  Summary built for {len(summary)} customers "
           f"({repeat_count} with repeat purchases)")
@@ -501,6 +508,7 @@ def run_clv_pipeline(
     ggf.save_model(str(gamma_gamma_path), save_generate_data_method=False)
 
     payload: Dict[str, Any] = {
+        "reference_date": reference_date,
         "horizon_days": horizon_days,
         "penalizer_coef": penalizer_coef,
         "n_customers": int(clv_df.height),
@@ -510,6 +518,8 @@ def run_clv_pipeline(
         "bgnbd_params": {k: float(v) for k, v in bgf.params_.items()},
         "gamma_gamma_params": {k: float(v) for k, v in ggf.params_.items()},
         "gamma_gamma_q_below_one": q_value <= 1.0,
+        # The Gamma-Gamma population mean order value p * v / (q - 1) only exists for q > 1.
+        "gamma_gamma_mean_undefined": bool(q_value <= 1.0),
         "order_value_fallback_count": fallback_value,
         "purchase_fallback_count": fallback_purchases,
         "total_predicted_clv": float(clv_df["predicted_clv"].sum()),
@@ -530,6 +540,7 @@ def run_clv_pipeline(
     print(f"Saved summary to           {summary_out}")
 
     return {
+        **payload,
         "bgnbd": bgf,
         "gamma_gamma": ggf,
         "summary_table": summary,
@@ -553,6 +564,8 @@ if __name__ == "__main__":
     parser.add_argument("--db-path", type=str, default=None, help="Warehouse to read (default: synthetic)")
     parser.add_argument("--features-dir", type=str, default=None, help="Directory for user_clv.parquet")
     parser.add_argument("--artifacts-dir", type=str, default=None, help="Directory for model outputs")
+    parser.add_argument("--reference-date", type=str, default=TEST_REFERENCE_DATE,
+                        help="Use purchases at or before this timestamp (default: test reference date)")
     args = parser.parse_args()
 
     run_clv_pipeline(
@@ -562,4 +575,5 @@ if __name__ == "__main__":
         db_path=args.db_path,
         features_dir=args.features_dir,
         artifacts_dir=args.artifacts_dir,
+        reference_date=args.reference_date,
     )

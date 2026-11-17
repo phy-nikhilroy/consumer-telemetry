@@ -39,6 +39,13 @@ PREDICTION_WINDOW_DAYS = 7
 TRAIN_REFERENCE_DATES = ("2026-10-06 00:00:00", "2026-10-13 00:00:00")
 TEST_REFERENCE_DATE = "2026-10-20 00:00:00"
 
+# CLV validation. The holdout fits BG/NBD and Gamma-Gamma on purchases up to the
+# calibration end and scores the following holdout window. Shrinkage pulls a user's
+# observed mean order value toward the global mean with the weight of K pseudo-orders.
+CLV_ORDER_VALUE_SHRINKAGE_K = 3.0
+CLV_HOLDOUT_CALIBRATION_END = "2026-10-18 00:00:00"
+CLV_HOLDOUT_DAYS = 9
+
 # Model artifacts
 MODELS_DIR = PROJECT_ROOT / "src" / "models"
 ARTIFACTS_DIR = MODELS_DIR / "artifacts"
