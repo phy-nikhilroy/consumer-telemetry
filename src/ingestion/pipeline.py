@@ -28,6 +28,7 @@ from src.ingestion.ner_extractor import (
 )
 from src.ingestion.taxonomy_classifier import classify_product
 from src.ingestion.entity_resolver import compute_canonical_key, compute_canonical_name
+from src.ingestion.segmenter import segment_screen
 
 
 class ExtractedProduct(BaseModel):
@@ -52,6 +53,7 @@ class ExtractedProduct(BaseModel):
     category_similarity: float = 0.0
     price_verified: bool = False
     extraction_confidence: float = 0.0
+    is_focal: bool = False
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @field_validator("action")
@@ -219,6 +221,34 @@ def process(
         extraction_confidence=confidence,
         timestamp=timestamp
     )
+
+
+FOCAL_ACTIONS = ("buy", "cart")
+
+
+def process_screen(
+    raw_text: str,
+    app_source: str = "unknown",
+    timestamp: Optional[datetime] = None,
+) -> List[ExtractedProduct]:
+    """
+    Extracts every listing on a screen, one `ExtractedProduct` per segment.
+
+    The screen is split with `segment_screen`, and each segment goes through `process`. All
+    products share one timestamp, because one screen is captured at one moment. Exactly one
+    product is marked `is_focal`: the first whose action is buy or cart, otherwise the first.
+    A v1.0 one-line string yields a single product equal to `process(raw_text)` apart from
+    `is_focal`. A multi-line screen with no text yields an empty list.
+    """
+    segments = segment_screen(raw_text)
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+    products = [process(segment, app_source=app_source, timestamp=timestamp) for segment in segments]
+    if not products:
+        return products
+    focal = next((i for i, p in enumerate(products) if p.action in FOCAL_ACTIONS), 0)
+    products[focal].is_focal = True
+    return products
 
 
 def run_pipeline(input_jsonl_path: str, output_parquet_path: str) -> pl.DataFrame:

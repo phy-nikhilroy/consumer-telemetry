@@ -116,3 +116,36 @@ def test_accessory_listing_scores_below_clean_listing():
     assert accessory.brand != "Samsung"
     assert accessory.extraction_confidence < clean.extraction_confidence
     assert clean.brand_source == BRAND_SOURCE_LEADING_MATCH
+
+
+def test_process_screen_one_line_matches_process() -> None:
+    from datetime import datetime, timezone
+    from src.ingestion.pipeline import process_screen
+
+    raw = "Samsung Galaxy S24 Ultra 256GB Titanium $1299.99 4.7 Add to Cart"
+    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    products = process_screen(raw, app_source="amazon_us", timestamp=ts)
+    assert len(products) == 1
+    single = process(raw, app_source="amazon_us", timestamp=ts)
+    assert products[0].model_dump(exclude={"is_focal"}) == single.model_dump(exclude={"is_focal"})
+    assert products[0].is_focal
+
+
+def test_process_screen_marks_exactly_one_focal_product() -> None:
+    import random as _random
+    from src.ingestion.pipeline import process_screen
+    from src.ingestion.screen_generator import render_listing, render_screen
+    from src.ingestion.synthetic_data import CATALOG
+
+    rng = _random.Random(3)
+    for actions, focal_index in ((["view", "search", "cart", "buy"], 2), (["view", "wishlist"], 0)):
+        listings = [render_listing(CATALOG[i], "amazon_us", a, 0, 4.2, rng) for i, a in enumerate(actions)]
+        products = process_screen(render_screen(listings, rng), app_source="amazon_us")
+        assert len(products) == len(actions)
+        assert [p.is_focal for p in products].count(True) == 1
+        assert products[focal_index].is_focal
+        assert len({p.timestamp for p in products}) == 1
+
+
+def test_process_defaults_is_focal_false() -> None:
+    assert process("Apple iPhone 15 $799 Buy Now").is_focal is False
