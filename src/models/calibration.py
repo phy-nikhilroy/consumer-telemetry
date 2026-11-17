@@ -103,6 +103,11 @@ class CalibratedPropensityModel:
         self.method = method
         self.classes_ = np.array([0, 1])
 
+    @property
+    def n_features_in_(self) -> int:
+        """Number of input features, as scikit-learn estimators expose it (from the base model)."""
+        return int(self.base_model.n_features_in_)
+
     def predict_raw(self, X: np.ndarray) -> np.ndarray:
         """Returns the base model's uncalibrated positive-class probability."""
         return np.asarray(self.base_model.predict_proba(X))[:, 1]
