@@ -15,6 +15,30 @@ PROCESSED_DATA_DIR = DATA_DIR / "processed"
 FEATURES_DIR = DATA_DIR / "features"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 
+# Real Amazon-Reviews-2023 meta shards (not committed), keyed by file stem. The brand rules
+# were tuned on meta_shard0, so it is only ever train or tune data. The other three were
+# downloaded untouched and supply the held-out rows. meta_fashion_shard0 is the first 180,000
+# lines of the Clothing JSONL, because the dataset has no Clothing parquet folder.
+AMAZON_META_DIR = DATA_DIR / "external" / "amazon_meta"
+AMAZON_SHARDS: Dict[str, Path] = {
+    "meta_shard0": AMAZON_META_DIR / "meta_shard0.parquet",
+    "meta_cell_shard1": AMAZON_META_DIR / "meta_cell_shard1.parquet",
+    "meta_electronics_shard0": AMAZON_META_DIR / "meta_electronics_shard0.parquet",
+    "meta_fashion_shard0": AMAZON_META_DIR / "meta_fashion_shard0.parquet",
+}
+# The shard the brand rules were tuned on; never held-out data.
+AMAZON_TUNED_SHARD = "meta_shard0"
+# Where each shard came from, under https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/.
+# The plan named the parquet folder raw_meta_Clothing_Shoes_and_Jewelry, which the dataset
+# does not publish; the fashion shard is the first 180,000 lines of the Clothing JSONL,
+# converted by src/ingestion/amazon_jsonl_shard.py (README, reproduce section).
+AMAZON_SHARD_SOURCES: Dict[str, str] = {
+    "meta_shard0": "raw_meta_Cell_Phones_and_Accessories/full-00000-of-00007.parquet",
+    "meta_cell_shard1": "raw_meta_Cell_Phones_and_Accessories/full-00001-of-00007.parquet",
+    "meta_electronics_shard0": "raw_meta_Electronics/full-00000-of-00010.parquet",
+    "meta_fashion_shard0": "raw/meta_categories/meta_Clothing_Shoes_and_Jewelry.jsonl (first 180,000 lines)",
+}
+
 # Database & Schema
 DEFAULT_DB_PATH = PROCESSED_DATA_DIR / "consumer.duckdb"
 SCHEMA_SQL_PATH = PROJECT_ROOT / "src" / "features" / "schema.sql"

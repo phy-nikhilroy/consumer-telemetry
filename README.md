@@ -934,6 +934,20 @@ B=https://huggingface.co/datasets
 mkdir -p data/external/amazon_meta data/external/retailrocket
 curl -sSL -o data/external/amazon_meta/meta_shard0.parquet \
   "$B/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw_meta_Cell_Phones_and_Accessories/full-00000-of-00007.parquet"
+# Held-out shards for the brand rules (never used for tuning). Paths are AMAZON_SHARDS in src/config.py.
+curl -sSL -o data/external/amazon_meta/meta_cell_shard1.parquet \
+  "$B/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw_meta_Cell_Phones_and_Accessories/full-00001-of-00007.parquet"
+curl -sSL -o data/external/amazon_meta/meta_electronics_shard0.parquet \
+  "$B/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw_meta_Electronics/full-00000-of-00010.parquet"
+# The dataset has no Clothing parquet folder, so the fashion shard is built from the first 180,000
+# lines of the Clothing JSONL, converted to the schema of the cell shard.
+curl -sSL "$B/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw/meta_categories/meta_Clothing_Shoes_and_Jewelry.jsonl" \
+  | head -n 180000 > data/external/amazon_meta/meta_clothing_first180k.jsonl
+.venv/bin/python -m src.ingestion.amazon_jsonl_shard \
+  --input data/external/amazon_meta/meta_clothing_first180k.jsonl \
+  --reference-shard data/external/amazon_meta/meta_cell_shard1.parquet \
+  --output data/external/amazon_meta/meta_fashion_shard0.parquet
+rm data/external/amazon_meta/meta_clothing_first180k.jsonl
 curl -sSL -o data/external/retailrocket/events.csv \
   "$B/DanielKiani/RetailRocket-Recommender-Data/resolve/main/data/RetailRocket-Recommender-Data/data/events.csv"
 curl -sSL -o data/external/retailrocket/item_properties_part1.csv \
