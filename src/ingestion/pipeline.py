@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 import polars as pl
 from pydantic import BaseModel, Field, field_validator
 
@@ -23,10 +23,11 @@ from src.ingestion.ner_extractor import (
     BRAND_SOURCE_MATCH,
     extract_brand_with_source,
     extract_price_mentions,
+    extract_price_mentions_batch,
     extract_product_title,
     extract_specs,
 )
-from src.ingestion.taxonomy_classifier import METHOD_SUPERVISED, classify_product
+from src.ingestion.taxonomy_classifier import METHOD_SUPERVISED, classify_product, warm_taxonomy_queries
 from src.ingestion.entity_resolver import compute_canonical_key, compute_canonical_name
 from src.ingestion.confidence_model import predict_confidence
 from src.ingestion.segmenter import segment_screen
@@ -206,6 +207,12 @@ def calculate_hand_weighted_confidence(extracted: Dict[str, Any]) -> float:
     return round(score, 4)
 
 
+def _linguistic_fields(raw_text: str) -> tuple:
+    """Brand, brand source, title, and specs of one text."""
+    brand, brand_source = extract_brand_with_source(raw_text)
+    return brand, brand_source, extract_product_title(raw_text, brand=brand), extract_specs(raw_text)
+
+
 def process(
     raw_text: str,
     app_source: str = "unknown",
@@ -219,16 +226,28 @@ def process(
     With a `registry`, the canonical product id comes from `registry.resolve`, so differently
     worded listings of one product share an id. Without one, the v1.0 exact key is used.
     """
+    return _build_product(raw_text, app_source, timestamp, registry, extract_price_mentions(raw_text))
+
+
+def _build_product(
+    raw_text: str,
+    app_source: str,
+    timestamp: Optional[datetime],
+    registry: Optional["ProductRegistry"],
+    ner_amounts: List[float],
+    extracted: Optional[tuple] = None,
+) -> ExtractedProduct:
+    """The body of `process`, with the NER money amounts (and optionally the extractor output) supplied."""
     # 1. Deterministic regex extraction
     price_info = extract_price(raw_text)
     rating_info = extract_rating(raw_text)
     action = extract_action(raw_text)
 
     # 2. Linguistic NER extraction
-    brand, brand_source = extract_brand_with_source(raw_text)
-    product_title = extract_product_title(raw_text, brand=brand)
-    specs = extract_specs(raw_text)
-    price_verified = price_is_verified(price_info.get("price"), extract_price_mentions(raw_text))
+    if extracted is None:
+        extracted = _linguistic_fields(raw_text)
+    brand, brand_source, product_title, specs = extracted
+    price_verified = price_is_verified(price_info.get("price"), ner_amounts)
 
     # 3. Semantic taxonomy classification
     taxonomy_info = classify_product(product_title or "", brand=brand)
@@ -328,6 +347,45 @@ def process_screen(
     focal = next((i for i, p in enumerate(products) if p.action in FOCAL_ACTIONS), 0)
     products[focal].is_focal = True
     return products
+
+
+def process_batch(
+    raw_texts: Sequence[str],
+    app_sources: Optional[Sequence[str]] = None,
+    timestamps: Optional[Sequence[Optional[datetime]]] = None,
+    registry: Optional["ProductRegistry"] = None,
+    batch_size: int = 256,
+) -> List[ExtractedProduct]:
+    """
+    Runs many texts through the pipeline, equal to `[process(t, ...) for t in raw_texts]`.
+
+    The spaCy money pass goes through `nlp.pipe` and the taxonomy queries are encoded in
+    batches into the shared query cache before each record is classified. `app_sources`
+    defaults to "unknown" and `timestamps` to the current time; a supplied sequence must
+    match `raw_texts` in length or `ValueError` is raised.
+    """
+    n = len(raw_texts)
+    if app_sources is not None and len(app_sources) != n:
+        raise ValueError(f"app_sources has {len(app_sources)} items for {n} texts")
+    if timestamps is not None and len(timestamps) != n:
+        raise ValueError(f"timestamps has {len(timestamps)} items for {n} texts")
+    if n == 0:
+        return []
+    texts = list(raw_texts)
+    amounts = extract_price_mentions_batch(texts, batch_size=batch_size)
+    fields = [_linguistic_fields(t) for t in texts]
+    warm_taxonomy_queries([(f[2], f[0]) for f in fields], batch_size=batch_size)
+    return [
+        _build_product(
+            texts[i],
+            app_sources[i] if app_sources is not None else "unknown",
+            timestamps[i] if timestamps is not None else None,
+            registry,
+            amounts[i],
+            fields[i],
+        )
+        for i in range(n)
+    ]
 
 
 def run_pipeline(input_jsonl_path: str, output_parquet_path: str) -> pl.DataFrame:

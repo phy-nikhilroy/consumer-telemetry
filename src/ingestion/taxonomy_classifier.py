@@ -18,6 +18,7 @@ answers exactly as in v1.0.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 from pathlib import Path
@@ -93,13 +94,75 @@ METADATA_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "proces
 MODEL_NAME = "all-MiniLM-L6-v2"
 
 
+TAXONOMY_QUERY_CACHE_SIZE = 50_000
+
+# Encoders by model name, so the module-level cache can be keyed by plain strings, and
+# vectors computed in a batch waiting for the cache to take them.
+_ENCODERS: Dict[str, SentenceTransformer] = {}
+_PRIMED: Dict[Tuple[str, str], np.ndarray] = {}
+_SEEN: set = set()
+
+
+@functools.lru_cache(maxsize=TAXONOMY_QUERY_CACHE_SIZE)
+def _encode_query(model_name: str, query: str) -> np.ndarray:
+    """The normalized embedding of one query, cached by query string (read-only vector)."""
+    vector = _PRIMED.pop((model_name, query), None)
+    if vector is None:
+        vector = _ENCODERS[model_name].encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
+    vector = np.asarray(vector, dtype=np.float32)
+    vector.setflags(write=False)
+    _SEEN.add((model_name, query))
+    return vector
+
+
+def encode_queries(model_name: str, queries: List[str], batch_size: int = 256) -> np.ndarray:
+    """
+    Embeddings for many queries, one row each. Queries not yet cached are encoded together in
+    batches, then every row is served through the same cache `classify_product` uses.
+    """
+    # `_SEEN` only steers which queries are batch-encoded; forgetting it costs a re-encode,
+    # never a wrong vector, so it is bounded like the cache it shadows.
+    if len(_SEEN) > 2 * TAXONOMY_QUERY_CACHE_SIZE:
+        _SEEN.clear()
+    missing = list(dict.fromkeys(q for q in queries if (model_name, q) not in _SEEN))
+    if missing:
+        vectors = _ENCODERS[model_name].encode(
+            missing, convert_to_numpy=True, normalize_embeddings=True, batch_size=batch_size
+        )
+        for q, v in zip(missing, vectors):
+            _PRIMED[(model_name, q)] = v
+    try:
+        if not queries:
+            return np.zeros((0, 0), dtype=np.float32)
+        return np.stack([_encode_query(model_name, q) for q in queries])
+    finally:
+        # A primed vector whose query was already cached is never taken; drop it.
+        for q in missing:
+            _PRIMED.pop((model_name, q), None)
+
+
+def taxonomy_query(product_title: str, brand: Optional[str] = None) -> str:
+    """The text encoded for a title and brand."""
+    return f"{brand} {product_title}".strip() if brand else product_title.strip()
+
+
+def warm_taxonomy_queries(titles_brands: List[Tuple[str, Optional[str]]], batch_size: int = 256) -> None:
+    """Encodes, in batches, every non-empty query the classifier is about to be asked for."""
+    classifier = get_supervised_classifier()
+    prototype = classifier.prototype if classifier is not None else _prototype_classifier()
+    queries = [taxonomy_query(t or "", b) for t, b in titles_brands if (t and t.strip()) or b]
+    encode_queries(prototype.model_name, queries, batch_size)
+
+
 class TaxonomyClassifier:
     """
     Semantic Product Taxonomy Classifier using Sentence Transformers and FAISS.
     """
 
     def __init__(self, model_name: str = MODEL_NAME, index_path: Optional[str] = None) -> None:
-        self.model = SentenceTransformer(model_name)
+        self.model_name = model_name
+        self.model = _ENCODERS.get(model_name) or SentenceTransformer(model_name)
+        _ENCODERS[model_name] = self.model
         self.records: List[Dict[str, Any]] = TAXONOMY_RECORDS
         self.index_path = Path(index_path) if index_path else INDEX_PATH
         self.metadata_path = self.index_path.parent / "taxonomy_metadata.json"
@@ -169,8 +232,9 @@ class TaxonomyClassifier:
                 "nearest_category": None,
             }
 
-        query = f"{brand} {product_title}".strip() if brand else product_title.strip()
-        query_vector = self.model.encode([query], convert_to_numpy=True, normalize_embeddings=True).astype(np.float32)
+        query = taxonomy_query(product_title, brand)
+        _ENCODERS[self.model_name] = self.model
+        query_vector = _encode_query(self.model_name, query)[None, :]
 
         k = min(2, len(self.records))
         distances, indices = self.index.search(query_vector, k)
@@ -259,7 +323,12 @@ class SupervisedTaxonomyClassifier:
 
     def predict_proba(self, queries: List[str]) -> np.ndarray:
         """Class probabilities for each query, columns in `self.labels` order."""
-        vectors = self.prototype.model.encode(queries, convert_to_numpy=True, normalize_embeddings=True)
+        prototype = self.prototype
+        if isinstance(prototype, TaxonomyClassifier):
+            _ENCODERS[prototype.model_name] = prototype.model
+            vectors = encode_queries(prototype.model_name, list(queries))
+        else:  # a substitute encoder holder is not cached by name
+            vectors = prototype.model.encode(queries, convert_to_numpy=True, normalize_embeddings=True)
         return self.model.predict_proba(np.asarray(vectors, dtype=np.float32))
 
     def classify_product(
@@ -278,7 +347,7 @@ class SupervisedTaxonomyClassifier:
             result.update({"method": METHOD_SUPERVISED, "model_abstained": True, "model_label": None,
                            "model_assigned_probability": 0.0})
             return result
-        query = f"{brand} {product_title}".strip() if brand else product_title.strip()
+        query = taxonomy_query(product_title, brand)
         probs = self.predict_proba([query])[0]
         order = np.argsort(probs)[::-1]
         top = float(probs[order[0]])
@@ -355,6 +424,9 @@ def get_supervised_classifier() -> Optional[SupervisedTaxonomyClassifier]:
 def reset_classifiers() -> None:
     """Forgets the shared classifiers, so the next call re-reads the artifact (tests)."""
     global _classifier_instance, _supervised_instance, _supervised_checked
+    _encode_query.cache_clear()
+    _SEEN.clear()
+    _PRIMED.clear()
     _classifier_instance = None
     _supervised_instance = None
     _supervised_checked = False

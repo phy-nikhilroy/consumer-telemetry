@@ -23,7 +23,15 @@ from spacy.matcher import PhraseMatcher
 from src.ingestion.regex_extractor import extract_price, extract_rating, extract_action
 
 # Load spaCy English pipeline
-nlp = spacy.load("en_core_web_sm")
+# Tagger, parser, lemmatizer and attribute ruler are excluded: this module reads only tokens,
+# punctuation flags, and the statistical NER, so they were pure cost.
+NLP_EXCLUDED_COMPONENTS = ["tagger", "parser", "lemmatizer", "attribute_ruler"]
+nlp = spacy.load("en_core_web_sm", exclude=NLP_EXCLUDED_COMPONENTS)
+
+
+def _get_nlp() -> Any:
+    """Returns the shared spaCy pipeline (tok2vec and ner, without the unused components)."""
+    return nlp
 
 # Brand evidence labels, ordered from strongest to weakest. The pipeline uses these to
 # score how far an extracted brand can be trusted.
@@ -305,8 +313,13 @@ def extract_price_mentions(text: str) -> List[float]:
     if not text:
         return []
 
+    return _money_amounts(nlp(text))
+
+
+def _money_amounts(doc: Any) -> List[float]:
+    """The numeric amounts inside the MONEY entities of a processed doc."""
     amounts: List[float] = []
-    for ent in nlp(text).ents:
+    for ent in doc.ents:
         if ent.label_ != "MONEY":
             continue
         for number in re.finditer(r"\d[\d,]*(?:\.\d+)?", ent.text):
@@ -315,6 +328,16 @@ def extract_price_mentions(text: str) -> List[float]:
             except ValueError:
                 continue
     return amounts
+
+
+def extract_price_mentions_batch(texts: List[str], batch_size: int = 256) -> List[List[float]]:
+    """`extract_price_mentions` for many texts through `nlp.pipe`, in input order."""
+    results: List[List[float]] = [[] for _ in texts]
+    positions = [i for i, t in enumerate(texts) if t]
+    docs = nlp.pipe([texts[i] for i in positions], batch_size=batch_size)
+    for i, doc in zip(positions, docs):
+        results[i] = _money_amounts(doc)
+    return results
 
 
 def extract_specs(text: str) -> List[str]:
@@ -366,7 +389,7 @@ def extract_product_title(text: str, brand: Optional[str] = None) -> Optional[st
         return None
 
     # Keep the primary product name chunk (first 1 to 4 noun tokens)
-    doc = nlp(cleaned)
+    doc = nlp.make_doc(cleaned)  # tokens and punctuation flags need only the tokenizer
     tokens = [t.text for t in doc if not t.is_punct and t.text.strip()]
     if tokens:
         return " ".join(tokens[:4]).strip()
