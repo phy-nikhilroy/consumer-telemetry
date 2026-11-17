@@ -129,7 +129,7 @@ def grouped_folds(
     random_state: int = RANDOM_SEED,
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
     """
-    Returns the (fit_idx, heldout_idx) pairs of a shuffled StratifiedGroupKFold.
+    Returns the (fit_idx, held_out_idx) pairs of a shuffled StratifiedGroupKFold.
 
     Every group is held out exactly once and never appears on both sides of a fold.
     """
