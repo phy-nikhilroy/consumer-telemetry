@@ -175,10 +175,18 @@ def test_switching_implies_purchasing(split, train, test_matrix):
 
 
 def test_user_ids_are_unique_within_each_split(train, test_matrix):
-    """Verifies one row per user, since every feature is a per-user aggregate."""
+    """
+    Verifies one row per user per reference date, since every feature is a per-user
+    aggregate at that date. The train matrix stacks several reference dates, so a user
+    appears once in each block; the test matrix has a single date.
+    """
     for name, df in (("train", train), ("test", test_matrix)):
-        assert df["user_id"].n_unique() == df.height, f"{name} has duplicate user rows"
+        keys = df.select(["user_id", "reference_date"])
+        assert keys.is_duplicated().sum() == 0, f"{name} has duplicate (user, date) rows"
         assert df["user_id"].null_count() == 0
+        per_date = df.group_by("reference_date").agg(pl.col("user_id").n_unique().alias("u"),
+                                                     pl.len().alias("n"))
+        assert (per_date["u"] == per_date["n"]).all(), f"{name} repeats a user within a date"
 
 
 def test_train_and_test_schemas_match(train, test_matrix):

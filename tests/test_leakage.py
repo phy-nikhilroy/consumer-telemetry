@@ -217,9 +217,15 @@ def test_train_and_test_targets_actually_differ(train, test_matrix):
     Identical target vectors would mean the temporal split did nothing, and the test
     split would be measuring memorization rather than generalization.
     """
-    for target in (PRIMARY_TARGET, SWITCHING_TARGET):
-        same = (train[target].to_numpy() == test_matrix[target].to_numpy()).all()
-        assert not same, f"{target} is identical across train and test"
+    test_sorted = test_matrix.sort("user_id")
+    # The train matrix stacks one block per reference date; compare each block with the
+    # test matrix user by user.
+    for ref in train["reference_date"].unique().to_list():
+        block = train.filter(pl.col("reference_date") == ref).sort("user_id")
+        assert block["user_id"].to_list() == test_sorted["user_id"].to_list()
+        for target in (PRIMARY_TARGET, SWITCHING_TARGET):
+            same = (block[target].to_numpy() == test_sorted[target].to_numpy()).all()
+            assert not same, f"{target} at {ref} is identical to the test labels"
 
 
 def test_feature_values_differ_across_reference_dates(train, test_matrix):
