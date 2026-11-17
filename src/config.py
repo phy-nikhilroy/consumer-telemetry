@@ -155,3 +155,9 @@ PRICE_TIERS: Dict[str, Tuple[float, float]] = {
     "mid": (10_000.0, 50_000.0),
     "premium": (50_000.0, float("inf")),
 }
+
+
+# Wording-tolerant product matching (src/ingestion/entity_matcher.py). Chosen as the value in
+# {0.50, 0.55, ..., 0.95} that maximises F1 on tune-family pairs; see
+# reports/v1_2_entity_resolution.json.
+ENTITY_MATCH_THRESHOLD = 0.50

@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import polars as pl
 from pydantic import BaseModel, Field, field_validator
 
@@ -29,6 +29,9 @@ from src.ingestion.ner_extractor import (
 from src.ingestion.taxonomy_classifier import classify_product
 from src.ingestion.entity_resolver import compute_canonical_key, compute_canonical_name
 from src.ingestion.segmenter import segment_screen
+
+if TYPE_CHECKING:
+    from src.ingestion.entity_matcher import ProductRegistry
 
 
 class ExtractedProduct(BaseModel):
@@ -154,11 +157,15 @@ def calculate_extraction_confidence(extracted: Dict[str, Any]) -> float:
 def process(
     raw_text: str,
     app_source: str = "unknown",
-    timestamp: Optional[datetime] = None
+    timestamp: Optional[datetime] = None,
+    registry: Optional["ProductRegistry"] = None,
 ) -> ExtractedProduct:
     """
     Wires together regex, NER, taxonomy classifier, and entity resolver.
     Returns a validated ExtractedProduct Pydantic instance.
+
+    With a `registry`, the canonical product id comes from `registry.resolve`, so differently
+    worded listings of one product share an id. Without one, the v1.0 exact key is used.
     """
     # 1. Deterministic regex extraction
     price_info = extract_price(raw_text)
@@ -177,6 +184,16 @@ def process(
     # 4. Entity resolution
     canonical_id = compute_canonical_key(brand, product_title, specs)
     canonical_name = compute_canonical_name(brand, product_title)
+    if registry is not None:
+        canonical_id = registry.resolve({
+            "raw_text": raw_text,
+            "brand": brand,
+            "product_title": product_title,
+            "specs": specs,
+            "price": price_info.get("price"),
+            "currency": price_info.get("currency"),
+            "canonical_product_id": canonical_id,
+        })
 
     # 5. Extraction confidence
     category_similarity = float(taxonomy_info.get("confidence", 0.0))
@@ -230,6 +247,7 @@ def process_screen(
     raw_text: str,
     app_source: str = "unknown",
     timestamp: Optional[datetime] = None,
+    registry: Optional["ProductRegistry"] = None,
 ) -> List[ExtractedProduct]:
     """
     Extracts every listing on a screen, one `ExtractedProduct` per segment.
@@ -238,12 +256,14 @@ def process_screen(
     products share one timestamp, because one screen is captured at one moment. Exactly one
     product is marked `is_focal`: the first whose action is buy or cart, otherwise the first.
     A v1.0 one-line string yields a single product equal to `process(raw_text)` apart from
-    `is_focal`. A multi-line screen with no text yields an empty list.
+    `is_focal`. A `registry` is passed through to `process`. A multi-line screen with no text yields an empty list.
     """
     segments = segment_screen(raw_text)
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
-    products = [process(segment, app_source=app_source, timestamp=timestamp) for segment in segments]
+    products = [
+        process(segment, app_source=app_source, timestamp=timestamp, registry=registry) for segment in segments
+    ]
     if not products:
         return products
     focal = next((i for i, p in enumerate(products) if p.action in FOCAL_ACTIONS), 0)

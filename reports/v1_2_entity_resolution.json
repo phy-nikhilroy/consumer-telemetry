@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "release": "1.2",
+  "generated_at": "2026-11-17T19:01:24+00:00",
+  "git_commit": "e14851d",
+  "seed": 42,
+  "results": {
+    "threshold": 0.5,
+    "threshold_grid": [
+      0.5,
+      0.55,
+      0.6,
+      0.65,
+      0.7,
+      0.75,
+      0.8,
+      0.85,
+      0.9,
+      0.95
+    ],
+    "tune": {
+      "matcher": {
+        "precision": 1.0,
+        "recall": 0.947,
+        "f1": 0.9728,
+        "hard_negative_false_match_rate": 0.0,
+        "n_pairs": 2093,
+        "n_hard_negatives": 602
+      },
+      "v1_exact_key": {
+        "precision": 0.9721,
+        "recall": 0.3295,
+        "f1": 0.4922,
+        "hard_negative_false_match_rate": 0.0166,
+        "n_pairs": 2093,
+        "n_hard_negatives": 602
+      }
+    },
+    "test": {
+      "matcher": {
+        "precision": 0.9956,
+        "recall": 0.9513,
+        "f1": 0.9729,
+        "hard_negative_false_match_rate": 0.005,
+        "n_pairs": 1907,
+        "n_hard_negatives": 598
+      },
+      "v1_exact_key": {
+        "precision": 0.9385,
+        "recall": 0.3559,
+        "f1": 0.5161,
+        "hard_negative_false_match_rate": 0.0368,
+        "n_pairs": 1907,
+        "n_hard_negatives": 598
+      }
+    },
+    "n_pairs": 4000,
+    "n_families": {
+      "tune": 24,
+      "test": 22
+    }
+  },
+  "tripwire_notes": []
+}
