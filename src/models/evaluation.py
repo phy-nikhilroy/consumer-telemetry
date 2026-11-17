@@ -29,8 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
-from sklearn.base import clone
-from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.calibration import calibration_curve
 from sklearn.metrics import (
     average_precision_score,
     brier_score_loss,
@@ -39,7 +38,6 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.model_selection import StratifiedKFold, cross_val_predict
 
 from src.config import (
     ARTIFACTS_DIR,
@@ -48,12 +46,14 @@ from src.config import (
     RANDOM_SEED,
     rebase_path,
 )
-from src.features.feature_store import get_modeling_matrices
-from src.models.propensity import (
-    DEFAULT_PARAMS,
-    compute_scale_pos_weight,
-    train_propensity_model,
+from src.features.feature_store import get_modeling_groups, get_modeling_matrices
+from src.models.calibration import (
+    CALIBRATION_METHODS,
+    CalibratedPropensityModel,
+    build_base_estimator,
+    fit_grouped_calibration,
 )
+from src.models.propensity import train_propensity_model
 
 CALIBRATION_PLOT_PATH = ARTIFACTS_DIR / "propensity_calibration_curve.png"
 LIFT_PLOT_PATH = ARTIFACTS_DIR / "propensity_lift_chart.png"
@@ -61,80 +61,23 @@ GAINS_PLOT_PATH = ARTIFACTS_DIR / "propensity_cumulative_gains.png"
 ROC_PR_PLOT_PATH = ARTIFACTS_DIR / "propensity_roc_pr_curves.png"
 EVALUATION_SUMMARY_PATH = ARTIFACTS_DIR / "propensity_evaluation_summary.json"
 
-CALIBRATION_METHODS: Tuple[str, ...] = ("isotonic", "sigmoid")
+# Risk bands split users into thirds of the out-of-fold calibrated probability.
+RISK_BAND_PERCENTILES: Tuple[float, float] = (33.0, 67.0)
 
 
-def build_base_estimator(y_train: np.ndarray, n_estimators: int = 50) -> lgb.LGBMClassifier:
+def compute_risk_bands(
+    calibrated_proba: np.ndarray,
+    percentiles: Tuple[float, float] = RISK_BAND_PERCENTILES,
+) -> Dict[str, float]:
     """
-    Returns an unfitted LightGBM estimator configured like the propensity model.
+    Returns the low and high propensity cut points.
 
-    A fixed boosting round count replaces early stopping here, because
-    CalibratedClassifierCV refits the estimator on internal cross-validation folds and
-    cannot pass an evaluation set through to each fit.
+    A user is low risk below `low_below`, high at or above `high_at_or_above`, and medium
+    in between. The cuts come from out-of-fold calibrated training scores, so they never
+    depend on the test split.
     """
-    params = dict(DEFAULT_PARAMS)
-    params["n_estimators"] = n_estimators
-    params["scale_pos_weight"] = compute_scale_pos_weight(y_train)
-    return lgb.LGBMClassifier(**params)
-
-
-def select_calibration_method(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    methods: Tuple[str, ...] = CALIBRATION_METHODS,
-    cv_folds: int = 5,
-    random_state: int = RANDOM_SEED,
-) -> Dict[str, Any]:
-    """
-    Chooses a calibration method using cross-validated Brier score on the training data.
-
-    Selecting on the training matrix rather than the test split keeps the reported test
-    metrics free of selection bias.
-    """
-    cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
-    scores: Dict[str, Dict[str, float]] = {}
-
-    base_proba = cross_val_predict(
-        build_base_estimator(y_train), X_train, y_train, cv=cv, method="predict_proba"
-    )[:, 1]
-    scores["uncalibrated"] = {
-        "brier_score": float(brier_score_loss(y_train, base_proba)),
-        "log_loss": float(log_loss(y_train, base_proba, labels=[0, 1])),
-        "roc_auc": float(roc_auc_score(y_train, base_proba)),
-    }
-
-    for method in methods:
-        calibrated = CalibratedClassifierCV(
-            estimator=build_base_estimator(y_train), method=method, cv=cv_folds
-        )
-        proba = cross_val_predict(calibrated, X_train, y_train, cv=cv, method="predict_proba")[:, 1]
-        scores[method] = {
-            "brier_score": float(brier_score_loss(y_train, proba)),
-            "log_loss": float(log_loss(y_train, proba, labels=[0, 1])),
-            "roc_auc": float(roc_auc_score(y_train, proba)),
-        }
-
-    best_method = min(methods, key=lambda m: scores[m]["brier_score"])
-    return {
-        "best_method": best_method,
-        "cv_scores": scores,
-        "improves_on_uncalibrated": scores[best_method]["brier_score"]
-        < scores["uncalibrated"]["brier_score"],
-    }
-
-
-def fit_calibrated_model(
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    method: str = "isotonic",
-    cv_folds: int = 5,
-) -> CalibratedClassifierCV:
-    """Fits a cross-validated calibrated classifier on the training matrix."""
-    calibrated = CalibratedClassifierCV(
-        estimator=build_base_estimator(y_train), method=method, cv=cv_folds
-    )
-    calibrated.fit(X_train, y_train)
-    return calibrated
+    low, high = np.percentile(np.asarray(calibrated_proba, dtype=float), percentiles)
+    return {"low_below": float(low), "high_at_or_above": float(high)}
 
 
 def compute_calibration_metrics(y_true: np.ndarray, y_proba: np.ndarray) -> Dict[str, float]:
@@ -442,21 +385,35 @@ def run_evaluation_pipeline(
         split="test", target_col=target_col, features_dir=features_dir
     )
 
+    # The train matrix holds one row per user per reference date; every split below
+    # keeps a user's rows together.
+    groups = get_modeling_groups("train", features_dir=features_dir)
+
     print("Fitting uncalibrated propensity model...")
-    base_model = train_propensity_model(X_train, y_train)
+    base_model = train_propensity_model(X_train, y_train, groups=groups)
     proba_before = base_model.predict_proba(X_test)[:, 1]
 
-    print("Selecting a calibration method by cross-validated Brier score on train...")
-    selection = select_calibration_method(X_train, y_train)
-    best_method = selection["best_method"]
-    print(f"  Uncalibrated CV Brier : {selection['cv_scores']['uncalibrated']['brier_score']:.4f}")
-    for method in CALIBRATION_METHODS:
-        print(f"  {method:<10s} CV Brier : {selection['cv_scores'][method]['brier_score']:.4f}")
+    print("Selecting a calibration method by grouped cross-validated Brier score on train...")
+    calibrated_model, calibration_info = fit_grouped_calibration(
+        X_train, y_train, groups, methods=CALIBRATION_METHODS
+    )
+    best_method = calibration_info["best_method"]
+    selection = {
+        "best_method": best_method,
+        "cv_scores": {
+            "uncalibrated": calibration_info["uncalibrated_cv_scores"],
+            **calibration_info["cv_scores"],
+        },
+        "improves_on_uncalibrated": calibration_info["improves_on_uncalibrated"],
+        "grouped_folds": len(calibration_info["folds"]),
+    }
+    for method, scores in selection["cv_scores"].items():
+        print(f"  {method:<12s} CV Brier : {scores['brier_score']:.4f}")
     print(f"  Selected method       : {best_method}")
-
-    print(f"Fitting {best_method} calibrated model on the training matrix...")
-    calibrated_model = fit_calibrated_model(X_train, y_train, method=best_method)
     proba_after = calibrated_model.predict_proba(X_test)[:, 1]
+    risk_bands = compute_risk_bands(calibration_info["oof_calibrated_probabilities"])
+    print(f"  Risk bands            : low < {risk_bands['low_below']:.4f} <= medium < "
+          f"{risk_bands['high_at_or_above']:.4f} <= high")
 
     metrics_before = compute_calibration_metrics(y_test, proba_before)
     metrics_after = compute_calibration_metrics(y_test, proba_after)
@@ -536,6 +493,7 @@ def run_evaluation_pipeline(
         "target": target_col,
         "calibration_method": best_method,
         "method_selection": selection,
+        "risk_bands": risk_bands,
         "test_metrics_uncalibrated": metrics_before,
         "test_metrics_calibrated": metrics_after,
         "top_decile_lift": top_decile_lift,
