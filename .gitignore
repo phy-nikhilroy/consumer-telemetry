@@ -46,6 +46,8 @@ data/features/*
 # Externally downloaded real-world datasets. Large, third-party licensed, and
 # reproducible from the adapter, so they stay out of the repository.
 data/external/
+# Isolated experiment outputs (seed runs, grids); results are summarized in reports/.
+data/experiments/
 !data/features/.gitkeep
 !data/features/selected_features.json
 
