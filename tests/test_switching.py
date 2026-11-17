@@ -178,3 +178,13 @@ def test_plot_confusion_matrix_writes_image(tmp_path):
 
     assert out.exists()
     assert out.stat().st_size > 1000
+
+
+def test_train_switching_model_accepts_groups():
+    rng = np.random.default_rng(2)
+    n_users, rows = 120, 3
+    groups = np.repeat(np.arange(n_users), rows)
+    y = np.repeat(rng.integers(0, 2, n_users), rows)
+    X = rng.normal(size=(len(y), 4)) + y[:, None] * 0.8
+    model = train_switching_model(X, y, groups=groups)
+    assert model.predict_proba(X).shape == (len(y), 2)

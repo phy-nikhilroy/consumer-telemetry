@@ -61,7 +61,8 @@ from src.config import (
     TRAIN_FEATURES_PATH,
     rebase_path,
 )
-from src.features.feature_store import fill_missing_features
+from src.features.feature_store import fill_missing_features, get_modeling_groups
+from src.models.propensity import grouped_validation_split
 
 MULTICLASS_LABELS: Tuple[str, ...] = ("no_purchase", "bought_on_dominant_app", "switched_app")
 
@@ -174,12 +175,14 @@ def train_switching_model(
     validation_fraction: float = 0.2,
     early_stopping_rounds: int = 50,
     random_state: int = RANDOM_SEED,
+    groups: Optional[np.ndarray] = None,
 ) -> lgb.LGBMClassifier:
     """
     Fits a LightGBM classifier for either the binary or the three-class formulation.
 
     The objective is inferred from the label cardinality, and a stratified slice of the
-    training matrix selects the boosting round count.
+    training matrix selects the boosting round count. When `groups` is given the slice is
+    a grouped split so no user spans fit and validation.
     """
     n_classes = len(np.unique(y_train))
     base = dict(MULTICLASS_PARAMS if n_classes > 2 else BINARY_PARAMS)
@@ -190,13 +193,18 @@ def train_switching_model(
 
     eval_metric = "multi_logloss" if n_classes > 2 else "binary_logloss"
 
-    X_fit, X_val, y_fit, y_val = train_test_split(
-        X_train,
-        y_train,
-        test_size=validation_fraction,
-        stratify=y_train,
-        random_state=random_state,
-    )
+    if groups is not None:
+        fit_idx, val_idx = grouped_validation_split(y_train, groups, random_state=random_state)
+        X_fit, X_val = X_train[fit_idx], X_train[val_idx]
+        y_fit, y_val = y_train[fit_idx], y_train[val_idx]
+    else:
+        X_fit, X_val, y_fit, y_val = train_test_split(
+            X_train,
+            y_train,
+            test_size=validation_fraction,
+            stratify=y_train,
+            random_state=random_state,
+        )
 
     model = lgb.LGBMClassifier(**base)
     model.fit(
@@ -495,7 +503,8 @@ def run_switching_pipeline(
     print(f"  Test : {X_test.shape[0]} rows x {X_test.shape[1]} features, "
           f"switch rate {float(np.mean(y_bin_test)):.3f}")
 
-    binary_model = train_switching_model(X_train, y_bin_train)
+    groups = get_modeling_groups("train", features_dir=features_dir)
+    binary_model = train_switching_model(X_train, y_bin_train, groups=groups)
     binary_train_metrics = evaluate_binary_switching(binary_model, X_train, y_bin_train)
     binary_test_metrics = evaluate_binary_switching(binary_model, X_test, y_bin_test)
 
@@ -526,7 +535,7 @@ def run_switching_pipeline(
     distribution = {MULTICLASS_LABELS[c]: int(np.sum(y_mc_train == c)) for c in range(3)}
     print(f"  Train class distribution: {distribution}")
 
-    multiclass_model = train_switching_model(X_train, y_mc_train)
+    multiclass_model = train_switching_model(X_train, y_mc_train, groups=groups)
     mc_test_metrics = evaluate_multiclass_switching(multiclass_model, X_test, y_mc_test)
 
     print(f"  TEST: Accuracy {mc_test_metrics['accuracy']:.4f} | "

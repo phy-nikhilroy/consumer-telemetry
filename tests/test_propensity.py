@@ -119,3 +119,41 @@ def test_plot_feature_importance_writes_image(tmp_path):
 
     assert saved.exists()
     assert saved.stat().st_size > 1000
+
+
+def _grouped_data(n_users: int = 60, rows_per_user: int = 3):
+    rng = np.random.default_rng(0)
+    groups = np.repeat(np.arange(n_users), rows_per_user)
+    user_y = rng.integers(0, 2, n_users)
+    y = np.repeat(user_y, rows_per_user)
+    return y, groups
+
+
+def test_grouped_validation_split_keeps_users_together():
+    from src.models.propensity import grouped_validation_split
+
+    y, groups = _grouped_data()
+    fit_idx, val_idx = grouped_validation_split(y, groups)
+
+    assert set(groups[fit_idx]).isdisjoint(set(groups[val_idx]))
+    assert sorted(np.concatenate([fit_idx, val_idx]).tolist()) == list(range(len(y)))
+    assert len(val_idx) > 0 and len(fit_idx) > len(val_idx)
+
+
+def test_grouped_validation_split_is_deterministic():
+    from src.models.propensity import grouped_validation_split
+
+    y, groups = _grouped_data()
+    a = grouped_validation_split(y, groups, random_state=7)
+    b = grouped_validation_split(y, groups, random_state=7)
+    assert np.array_equal(a[0], b[0]) and np.array_equal(a[1], b[1])
+
+
+def test_train_propensity_model_accepts_groups():
+    from src.models.propensity import train_propensity_model
+
+    y, groups = _grouped_data(n_users=120)
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(len(y), 4)) + y[:, None] * 0.8
+    model = train_propensity_model(X, y, groups=groups)
+    assert model.predict_proba(X).shape == (len(y), 2)

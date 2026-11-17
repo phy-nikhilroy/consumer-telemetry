@@ -36,7 +36,7 @@ from sklearn.metrics import (
     log_loss,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedGroupKFold, train_test_split
 
 from src.config import (
     ARTIFACTS_DIR,
@@ -45,7 +45,7 @@ from src.config import (
     RANDOM_SEED,
     rebase_path,
 )
-from src.features.feature_store import get_modeling_matrices
+from src.features.feature_store import get_modeling_groups, get_modeling_matrices
 
 # Conservative hyperparameters. The modeling matrix is a few hundred rows wide by
 # roughly 18 features, so shallow trees and strong regularization matter more than
@@ -92,6 +92,23 @@ def compute_scale_pos_weight(y: np.ndarray) -> float:
     return negatives / positives
 
 
+def grouped_validation_split(
+    y: np.ndarray,
+    groups: np.ndarray,
+    n_splits: int = 5,
+    random_state: int = RANDOM_SEED,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Returns `(fit_idx, val_idx)` from the first fold of a shuffled StratifiedGroupKFold.
+
+    All rows of one group (a user) land on the same side, so the early-stopping slice
+    never shares a user with the rows the model is fitted on.
+    """
+    splitter = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    fit_idx, val_idx = next(splitter.split(np.zeros(len(y)), y, groups))
+    return fit_idx, val_idx
+
+
 def train_propensity_model(
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -99,9 +116,13 @@ def train_propensity_model(
     validation_fraction: float = 0.2,
     early_stopping_rounds: int = 50,
     random_state: int = RANDOM_SEED,
+    groups: Optional[np.ndarray] = None,
 ) -> lgb.LGBMClassifier:
     """
     Fits a LightGBM binary classifier with class reweighting and early stopping.
+
+    When `groups` (user ids) is given, the validation slice is a grouped split so no user
+    spans fit and validation; otherwise a stratified row split is used.
 
     A stratified slice of the training matrix is held back purely to choose the number
     of boosting rounds. The test split is never touched here, so the reported test
@@ -112,13 +133,18 @@ def train_propensity_model(
         model_params.update(params)
     model_params["scale_pos_weight"] = compute_scale_pos_weight(y_train)
 
-    X_fit, X_val, y_fit, y_val = train_test_split(
-        X_train,
-        y_train,
-        test_size=validation_fraction,
-        stratify=y_train,
-        random_state=random_state,
-    )
+    if groups is not None:
+        fit_idx, val_idx = grouped_validation_split(y_train, groups, random_state=random_state)
+        X_fit, X_val = X_train[fit_idx], X_train[val_idx]
+        y_fit, y_val = y_train[fit_idx], y_train[val_idx]
+    else:
+        X_fit, X_val, y_fit, y_val = train_test_split(
+            X_train,
+            y_train,
+            test_size=validation_fraction,
+            stratify=y_train,
+            random_state=random_state,
+        )
 
     model = lgb.LGBMClassifier(**model_params)
     model.fit(
@@ -276,7 +302,8 @@ def run_training_pipeline(
     print(f"  Test positive rate : {float(np.mean(y_test)):.3f}")
     print(f"  scale_pos_weight   : {compute_scale_pos_weight(y_train):.4f}")
 
-    model = train_propensity_model(X_train, y_train)
+    groups = get_modeling_groups("train", features_dir=features_dir)
+    model = train_propensity_model(X_train, y_train, groups=groups)
 
     train_metrics = evaluate_propensity_model(model, X_train, y_train)
     test_metrics = evaluate_propensity_model(model, X_test, y_test)
