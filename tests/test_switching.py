@@ -188,3 +188,61 @@ def test_train_switching_model_accepts_groups():
     X = rng.normal(size=(len(y), 4)) + y[:, None] * 0.8
     model = train_switching_model(X, y, groups=groups)
     assert model.predict_proba(X).shape == (len(y), 2)
+
+
+def _toy_frame() -> pl.DataFrame:
+    """Small frame with buyers and non-buyers for conditional-target tests."""
+    return pl.DataFrame(
+        {
+            "user_id": ["a", "b", "c", "d", "e"],
+            PRIMARY_TARGET: [0, 1, 1, 0, 1],
+            SWITCHING_TARGET: [0, 0, 1, 0, 1],
+        }
+    )
+
+
+def test_conditional_rows_are_buyers_only():
+    """Only rows with will_purchase_next_7d == 1 survive."""
+    from src.models.switching import build_conditional_target
+
+    out = build_conditional_target(_toy_frame())
+    assert out.height == 3
+    assert set(out[PRIMARY_TARGET].to_list()) == {1}
+
+
+def test_conditional_target_matches_switch_flag():
+    """switched_given_purchase equals will_switch_app_next_7d on kept rows."""
+    from src.config import SWITCHING_CONDITIONAL_TARGET
+    from src.models.switching import build_conditional_target
+
+    out = build_conditional_target(_toy_frame())
+    assert out[SWITCHING_CONDITIONAL_TARGET].to_list() == out[SWITCHING_TARGET].to_list()
+    assert out[SWITCHING_CONDITIONAL_TARGET].to_list() == [0, 1, 1]
+
+
+def test_conditional_model_contract(tmp_path):
+    """The saved artifact has predict_proba and the metrics carry the spec keys."""
+    import joblib
+
+    from src.models.switching import run_conditional_switching
+
+    _require_matrices()
+    res = run_conditional_switching(
+        features_dir=TRAIN_PATH.parent, model_path=tmp_path / "cond.joblib"
+    )
+    model = joblib.load(tmp_path / "cond.joblib")
+    assert hasattr(model, "predict_proba")
+    assert len(res["feature_names"]) == model.n_features_in_
+    assert set(res["metrics"]) == {
+        "n_samples", "positive_rate", "roc_auc", "pr_auc", "ci",
+        "baseline_dominant_share_auc", "delta_vs_baseline",
+    }
+    assert len(res["metrics"]["ci"]) == 2
+
+
+def test_bootstrap_auc_ci_degenerate_labels():
+    """A single-class sample yields NaN bounds rather than raising."""
+    from src.models.switching import bootstrap_auc_ci
+
+    ci = bootstrap_auc_ci(np.ones(10), np.arange(10.0), n_boot=5)
+    assert np.isnan(ci[0]) and np.isnan(ci[1])

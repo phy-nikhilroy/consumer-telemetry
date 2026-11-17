@@ -52,9 +52,12 @@ from sklearn.model_selection import train_test_split
 
 from src.config import (
     ARTIFACTS_DIR,
+    SWITCHING_CONDITIONAL_TARGET,
     PRIMARY_TARGET,
     RANDOM_SEED,
+    CONDITIONAL_BOOTSTRAP_SAMPLES,
     SELECTED_FEATURES_PATH,
+    SWITCHING_CONDITIONAL_MODEL_PATH,
     SWITCHING_MODEL_PATH,
     SWITCHING_TARGET,
     TEST_FEATURES_PATH,
@@ -476,6 +479,98 @@ def plot_shap_importance_bar(
     return out
 
 
+def build_conditional_target(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Returns the rows eligible for the conditional switching model with the derived target.
+
+    `switched_given_purchase` is defined only where `will_purchase_next_7d == 1`; its value
+    is `will_switch_app_next_7d`. Non-buyer rows are dropped.
+    """
+    return df.filter(pl.col(PRIMARY_TARGET) == 1).with_columns(
+        pl.col(SWITCHING_TARGET).alias(SWITCHING_CONDITIONAL_TARGET)
+    )
+
+
+def bootstrap_auc_ci(
+    y: np.ndarray,
+    score: np.ndarray,
+    n_boot: int = CONDITIONAL_BOOTSTRAP_SAMPLES,
+    alpha: float = 0.05,
+    random_state: int = RANDOM_SEED,
+) -> List[float]:
+    """Percentile bootstrap confidence interval for ROC-AUC; [nan, nan] if undefined."""
+    y = np.asarray(y)
+    score = np.asarray(score)
+    rng = np.random.default_rng(random_state)
+    stats: List[float] = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, len(y), len(y))
+        if len(np.unique(y[idx])) < 2:
+            continue
+        stats.append(float(roc_auc_score(y[idx], score[idx])))
+    if not stats:
+        return [float("nan"), float("nan")]
+    lo, hi = np.percentile(stats, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+    return [float(lo), float(hi)]
+
+
+def evaluate_conditional_switching(
+    model: Any,
+    X: np.ndarray,
+    y: np.ndarray,
+    dominant_share: np.ndarray,
+) -> Dict[str, Any]:
+    """
+    Scores the conditional model on buyer rows against the `1 - dominant_app_share` baseline.
+
+    `delta_vs_baseline` is model ROC-AUC minus baseline ROC-AUC.
+    """
+    proba = model.predict_proba(X)[:, 1]
+    baseline = 1.0 - np.asarray(dominant_share, dtype=float)
+    roc = float(roc_auc_score(y, proba))
+    base_auc = float(roc_auc_score(y, baseline))
+    return {
+        "n_samples": int(len(y)),
+        "positive_rate": float(np.mean(y)),
+        "roc_auc": roc,
+        "pr_auc": float(average_precision_score(y, proba)),
+        "ci": bootstrap_auc_ci(y, proba),
+        "baseline_dominant_share_auc": base_auc,
+        "delta_vs_baseline": roc - base_auc,
+    }
+
+
+def run_conditional_switching(
+    features_dir: Optional[Union[str, Path]] = None,
+    artifacts_dir: Optional[Union[str, Path]] = None,
+    model_path: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """Trains the buyers-only switching model, saves it, and returns test metrics and the model."""
+    train_df = pl.read_parquet(rebase_path(TRAIN_FEATURES_PATH, features_dir))
+    test_df = pl.read_parquet(rebase_path(TEST_FEATURES_PATH, features_dir))
+    names = load_selected_feature_names(train_df, rebase_path(SELECTED_FEATURES_PATH, features_dir))
+
+    tr = build_conditional_target(train_df)
+    te = build_conditional_target(test_df)
+    X_tr = fill_missing_features(tr, names).to_numpy().astype(np.float32)
+    X_te = fill_missing_features(te, names).to_numpy().astype(np.float32)
+    y_tr = tr[SWITCHING_CONDITIONAL_TARGET].to_numpy()
+    y_te = te[SWITCHING_CONDITIONAL_TARGET].to_numpy()
+
+    model = train_switching_model(X_tr, y_tr, groups=tr["user_id"].to_numpy())
+    metrics = evaluate_conditional_switching(
+        model, X_te, y_te, te["dominant_app_share"].to_numpy()
+    )
+
+    out = Path(model_path) if model_path else rebase_path(
+        SWITCHING_CONDITIONAL_MODEL_PATH, artifacts_dir
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, out)
+    print(f"\n--- Conditional Switching (buyers only) ---\n  {metrics}\n  Saved to {out}")
+    return {"model": model, "metrics": metrics, "feature_names": names, "path": out}
+
+
 def run_switching_pipeline(
     model_path: Optional[Union[str, Path]] = None,
     multiclass_path: Optional[Union[str, Path]] = None,
@@ -546,6 +641,10 @@ def run_switching_pipeline(
           f"Multi Log Loss {mc_test_metrics['multi_log_loss']:.4f}")
     print("\n" + mc_test_metrics["classification_report"])
 
+    conditional = run_conditional_switching(
+        features_dir=features_dir, artifacts_dir=artifacts_dir
+    )
+
     print("--- SHAP Attribution (Binary Switching Model, Test Split) ---")
     shap_values = compute_shap_values(binary_model, X_test, class_index=1)
     drivers = rank_shap_drivers(shap_values, feature_names, X_test, top_n=top_n_drivers)
@@ -589,6 +688,7 @@ def run_switching_pipeline(
         },
         "tuned_threshold": tuned_threshold,
         "multiclass_test": {k: v for k, v in mc_test_metrics.items() if k != "classification_report"},
+        "conditional_test": conditional["metrics"],
         "top_shap_drivers": drivers.to_dicts(),
     }
     metrics_out.parent.mkdir(parents=True, exist_ok=True)

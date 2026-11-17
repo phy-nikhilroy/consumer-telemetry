@@ -45,6 +45,7 @@ ARTIFACTS_DIR = MODELS_DIR / "artifacts"
 PROPENSITY_MODEL_PATH = ARTIFACTS_DIR / "propensity_lgbm.joblib"
 PROPENSITY_CALIBRATED_PATH = ARTIFACTS_DIR / "propensity_lgbm_calibrated.joblib"
 SWITCHING_MODEL_PATH = ARTIFACTS_DIR / "switching_lgbm.joblib"
+SWITCHING_CONDITIONAL_MODEL_PATH = ARTIFACTS_DIR / "switching_conditional_lgbm.joblib"
 SEGMENTATION_MODEL_PATH = ARTIFACTS_DIR / "segmentation_kmeans.joblib"
 CLV_BGNBD_PATH = ARTIFACTS_DIR / "clv_bgnbd.joblib"
 CLV_GAMMAGAMMA_PATH = ARTIFACTS_DIR / "clv_gammagamma.joblib"
@@ -65,6 +66,8 @@ TAXONOMY_CONFIDENT_SIMILARITY = 0.45
 PRIMARY_TARGET = "will_purchase_next_7d"
 SWITCHING_TARGET = "will_switch_app_next_7d"
 COUNT_TARGET = "num_purchases_next_7d"
+SWITCHING_CONDITIONAL_TARGET = "switched_given_purchase"
+CONDITIONAL_BOOTSTRAP_SAMPLES = 500
 TARGET_COLUMNS = (PRIMARY_TARGET, COUNT_TARGET, SWITCHING_TARGET)
 
 # Recency features measure days since a user last did something. A null means the user
