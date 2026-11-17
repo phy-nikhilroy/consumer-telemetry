@@ -13,6 +13,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 FEATURES_DIR = DATA_DIR / "features"
+REPORTS_DIR = PROJECT_ROOT / "reports"
 
 # Database & Schema
 DEFAULT_DB_PATH = PROCESSED_DATA_DIR / "consumer.duckdb"

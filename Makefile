@@ -8,10 +8,11 @@ JUPYTER   := $(VENV)/bin/jupyter
 UVICORN   := $(VENV)/bin/uvicorn
 STREAMLIT := $(VENV)/bin/streamlit
 API_URL   ?= http://localhost:8000
+VERSION   ?= 1.1
 
 NOTEBOOKS := 04_transformer_ner 14_feature_eda 16_model_evaluation 20_model_evaluation_report
 
-.PHONY: help setup venv-check test check run-pipeline simulate sessionize features models \
+.PHONY: gate help setup venv-check test check run-pipeline simulate sessionize features models \
         pipeline notebooks report benchmark serving-db serving-reset api dashboard stream \
         monitor api-benchmark docker-build compose-up compose-down
 
@@ -20,6 +21,7 @@ help:
 	@echo "  make setup         - Create .venv, install requirements, download the spaCy model"
 	@echo "  make venv-check    - Verify the Python and pytest binaries exist"
 	@echo "  make test          - Run the full pytest suite"
+	@echo "  make gate          - Run release gates: make gate VERSION=1.1"
 	@echo "  make check         - Show git status"
 	@echo "  make run-pipeline  - Push one sample screen string through the ingestion pipeline"
 	@echo "  make simulate      - Regenerate the simulated population and reload the warehouse"
@@ -123,3 +125,6 @@ compose-up:
 
 compose-down:
 	docker compose down
+
+gate:
+	$(PYTHON) src/release/gates.py --version $(VERSION)
