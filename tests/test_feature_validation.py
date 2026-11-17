@@ -66,3 +66,64 @@ def test_selected_features_json_schema():
     assert len(data["selected_features"]) >= 15
     assert "will_purchase_next_7d" in data["target_variables"]
     assert len(data["top_predictive_features"]) >= 3
+
+
+def _v2_info(tmp_path, df):
+    return select_features(df, output_path=tmp_path / "selected_features.json")
+
+
+def test_zero_variance_feature_is_dropped(tmp_path):
+    """A constant column is excluded from every target list; others keep matrix order."""
+    df = pl.DataFrame({
+        "user_id": ["a", "b", "c", "d"],
+        "const": [1.0, 1.0, 1.0, 1.0],
+        "f1": [1.0, 2.0, 3.0, 4.0],
+        "f2": [0, 1, 0, 1],
+        "top_category_l1": ["x", "y", "x", "y"],
+        "will_purchase_next_7d": [1, 0, 1, 1],
+        "will_switch_app_next_7d": [0, 0, 1, 0],
+    })
+    info = _v2_info(tmp_path, df)
+    assert info["schema_version"] == 2
+    assert "const" in info["dropped_zero_variance"]
+    for target, names in info["features_by_target"].items():
+        assert "const" not in names
+        assert names[:2] == ["f1", "f2"] or target == "switched_given_purchase"
+    assert info["selected_features"] == ["f1", "f2"]
+    assert "top_category_l1" not in info["candidate_features"]
+
+
+def test_zero_variance_is_evaluated_per_target(tmp_path):
+    """A feature constant only on purchasers is dropped for the conditional target alone."""
+    df = pl.DataFrame({
+        "g": [5.0, 5.0, 1.0, 2.0],
+        "h": [1.0, 2.0, 3.0, 4.0],
+        "will_purchase_next_7d": [1, 1, 0, 0],
+        "will_switch_app_next_7d": [0, 1, 0, 0],
+    })
+    info = _v2_info(tmp_path, df)
+    by = info["features_by_target"]
+    assert by["switched_given_purchase"] == ["h"]
+    assert by["will_purchase_next_7d"] == ["g", "h"]
+
+
+def test_cross_app_features_are_selected(tmp_path):
+    """
+    Cross-app features survive selection for both binary targets.
+
+    Selection runs on a train matrix built at the configured reference dates in a temp
+    directory, so the assertion holds for the split the models actually train on rather
+    than whatever matrix happens to be committed.
+    """
+    from src.features.feature_store import generate_train_test_datasets
+    from src.features.feature_validation import select_features
+
+    db_path = Path("data/processed/consumer.duckdb")
+    if not db_path.exists():
+        pytest.skip("Warehouse database not available")
+    train_df, _ = generate_train_test_datasets(db_path=db_path, features_dir=tmp_path)
+    data = select_features(train_df, output_path=tmp_path / "selected_features.json")
+    assert data["schema_version"] == 2
+    for target in ("will_purchase_next_7d", "will_switch_app_next_7d"):
+        for name in ("cross_app_comparison_count", "app_entropy", "num_apps_used"):
+            assert name in data["features_by_target"][target], (target, name)

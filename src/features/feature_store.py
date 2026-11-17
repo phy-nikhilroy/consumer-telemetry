@@ -419,7 +419,12 @@ def get_modeling_matrices(
     if s_file.exists():
         with open(s_file, "r", encoding="utf-8") as f:
             selected_info = json.load(f)
-        feature_names = [f for f in selected_info["selected_features"] if f in df.columns]
+        if selected_info.get("schema_version") == 2:
+            by_target = selected_info.get("features_by_target", {})
+            names = by_target.get(target_col, selected_info["selected_features"])
+        else:
+            names = selected_info["selected_features"]
+        feature_names = [f for f in names if f in df.columns]
     else:
         feature_names = [c for c in df.columns if c not in NON_FEATURE_COLUMNS]
 

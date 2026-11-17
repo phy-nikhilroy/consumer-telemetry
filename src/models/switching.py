@@ -108,7 +108,10 @@ def load_selected_feature_names(
     if path.exists():
         with open(path, "r", encoding="utf-8") as f:
             info = json.load(f)
-        return [name for name in info["selected_features"] if name in df.columns]
+        names = info["selected_features"]
+        if info.get("schema_version") == 2:
+            names = info.get("features_by_target", {}).get(SWITCHING_TARGET, names)
+        return [name for name in names if name in df.columns]
 
     ignore = {
         "user_id",

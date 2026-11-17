@@ -136,47 +136,71 @@ def compute_feature_importances(
     return scores
 
 
+SCHEMA_VERSION = 2
+SWITCH_GIVEN_PURCHASE_TARGET = "switched_given_purchase"
+_NON_CANDIDATE_COLUMNS = frozenset({
+    "user_id", "reference_date", "top_category_l1",
+    "will_purchase_next_7d", "num_purchases_next_7d", "will_switch_app_next_7d",
+    "switched_given_purchase",
+})
+
+
+def _target_rows(df: pl.DataFrame, target: str) -> pl.DataFrame:
+    """Returns the training rows a target is fitted on (purchasers only for the conditional target)."""
+    if target == SWITCH_GIVEN_PURCHASE_TARGET and "will_purchase_next_7d" in df.columns:
+        return df.filter(pl.col("will_purchase_next_7d") == 1)
+    return df
+
+
+def _zero_variance(df: pl.DataFrame, names: List[str]) -> List[str]:
+    """Names whose filled values take a single value (or no rows exist)."""
+    if df.height == 0:
+        return list(names)
+    filled = fill_missing_features(df, names)
+    return [n for n in names if filled[n].n_unique() <= 1]
+
+
 def select_features(
     df: pl.DataFrame,
-    importance_scores: List[Tuple[str, float]],
-    collinear_pairs: List[Tuple[str, str, float]],
-    top_k: int = 18,
+    importance_scores: Optional[List[Tuple[str, float]]] = None,
+    collinear_pairs: Optional[List[Tuple[str, str, float]]] = None,
+    top_k: Optional[int] = None,
     output_path: Optional[Union[str, Path]] = None
 ) -> Dict[str, Any]:
     """
-    Filters features by importance while pruning highly redundant collinear pairs.
-    Saves selected feature schema to JSON.
+    Writes the schema version 2 feature selection.
+
+    A target's list is every numeric candidate that is not zero-variance on the rows used
+    for that target, in matrix column order. Importance, collinearity, and `top_k` are
+    accepted for compatibility but never used for selection; they are analysis output only.
+    `selected_features` is the union of the per-target lists, kept for old readers.
     """
-    # Track pairs to prune (drop lower importance feature in collinear pair)
-    importance_dict = dict(importance_scores)
-    prune_set = set()
+    candidates = [
+        c for c, t in df.schema.items()
+        if c not in _NON_CANDIDATE_COLUMNS and t.is_numeric()
+    ]
+    targets = ["will_purchase_next_7d", "will_switch_app_next_7d", SWITCH_GIVEN_PURCHASE_TARGET]
+    features_by_target: Dict[str, List[str]] = {}
+    for target in targets:
+        dead = set(_zero_variance(_target_rows(df, target), candidates))
+        features_by_target[target] = [c for c in candidates if c not in dead]
 
-    for f1, f2, r in collinear_pairs:
-        imp1 = importance_dict.get(f1, 0.0)
-        imp2 = importance_dict.get(f2, 0.0)
-        if imp1 >= imp2:
-            prune_set.add(f2)
-        else:
-            prune_set.add(f1)
-
-    selected = []
-    for feat, score in importance_scores:
-        if feat not in prune_set and len(selected) < top_k:
-            selected.append(feat)
-
-    # If top_k not reached due to pruning, fill from remaining
-    for feat, score in importance_scores:
-        if feat not in selected and len(selected) < top_k:
-            selected.append(feat)
+    dropped = _zero_variance(df, candidates)
+    union = set().union(*features_by_target.values())
+    selected = [c for c in candidates if c in union]
 
     result = {
-        "total_candidate_features": len(importance_scores),
-        "selected_feature_count": len(selected),
+        "schema_version": SCHEMA_VERSION,
+        "candidate_features": candidates,
+        "dropped_zero_variance": dropped,
+        "features_by_target": features_by_target,
         "selected_features": selected,
-        "pruned_collinear_features": list(prune_set),
+        "total_candidate_features": len(candidates),
+        "selected_feature_count": len(selected),
+        "pruned_collinear_features": [],
         "top_predictive_features": [
-            {"feature": f, "importance": float(importance_dict[f])}
-            for f in selected[:5]
+            {"feature": f, "importance": float(s)}
+            for f, s in (importance_scores or [])[:5]
         ],
         "target_variables": [
             "will_purchase_next_7d",
@@ -238,7 +262,7 @@ def run_feature_validation_pipeline(
         collinear_pairs=collinear,
         output_path=out_path
     )
-    print(f"Selected {selection['selected_feature_count']} features. Saved to {out_path}")
+    print(f"Selected {selection['selected_feature_count']} features (no top-k cut). Saved to {out_path}")
 
     print("\n--- 5. Top 3 Most Predictive Features Summary ---")
     for i, item in enumerate(selection["top_predictive_features"][:3], 1):

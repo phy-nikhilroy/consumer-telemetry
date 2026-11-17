@@ -111,6 +111,11 @@ def test_train_test_split_datasets(tmp_path):
     assert set(train_df.columns) == set(test_df.columns)
 
 
+import json
+
+from src.config import SELECTED_FEATURES_PATH, TRAIN_FEATURES_PATH
+
+
 def test_get_modeling_matrices_train_and_test():
     """Verifies get_modeling_matrices loads features and binary targets with selected features."""
     db_path = Path("data/processed/consumer.duckdb")
@@ -121,10 +126,20 @@ def test_get_modeling_matrices_train_and_test():
         expected_users = con.execute("SELECT COUNT(*) FROM dim_users").fetchone()[0]
 
     X_train, y_train, feat_names_train = get_modeling_matrices(split="train", target_col="will_purchase_next_7d")
-    assert X_train.shape[0] == expected_users
+    # The train matrix stacks one block per train reference date.
+    train_rows = pl.read_parquet(TRAIN_FEATURES_PATH, columns=["user_id"]).height
+    assert train_rows % expected_users == 0
+    assert X_train.shape[0] == train_rows
     assert X_train.shape[1] == len(feat_names_train)
-    assert len(feat_names_train) == 18
-    assert len(y_train) == expected_users
+    # No top-k cut: under schema version 2 the list is the target's own list; the older
+    # schema (until the matrices are regenerated) keeps its flat selected list.
+    selected = json.loads(SELECTED_FEATURES_PATH.read_text(encoding="utf-8"))
+    if selected.get("schema_version") == 2:
+        expected_names = selected["features_by_target"]["will_purchase_next_7d"]
+    else:
+        expected_names = [f for f in selected["selected_features"]]
+    assert feat_names_train == expected_names
+    assert len(y_train) == train_rows
     assert set(pl.Series(y_train).unique().to_list()).issubset({0, 1})
 
     X_test, y_test, feat_names_test = get_modeling_matrices(split="test", target_col="will_purchase_next_7d")
@@ -542,3 +557,24 @@ def test_reference_date_is_in_every_non_feature_ignore_list():
         if '"top_category_l1"' in text and '"reference_date"' not in text:
             offenders.append(str(f))
     assert offenders == []
+
+
+def test_get_modeling_matrices_uses_per_target_list(tmp_path):
+    """Schema version 2 selects features_by_target[target_col]."""
+    import json
+    import polars as pl
+    from src.features.feature_store import get_modeling_matrices
+
+    pl.DataFrame({
+        "a": [1.0, 2.0], "b": [3.0, 4.0],
+        "will_purchase_next_7d": [0, 1], "will_switch_app_next_7d": [1, 0],
+    }).write_parquet(tmp_path / "m.parquet")
+    sel = tmp_path / "s.json"
+    sel.write_text(json.dumps({
+        "schema_version": 2, "selected_features": ["a", "b"],
+        "features_by_target": {"will_purchase_next_7d": ["a", "b"], "will_switch_app_next_7d": ["b"]},
+    }))
+    _, _, names = get_modeling_matrices(
+        target_col="will_switch_app_next_7d", features_path=tmp_path / "m.parquet",
+        selected_features_path=sel)
+    assert names == ["b"]
