@@ -16,7 +16,9 @@ def test_process_structure():
     assert prod.currency == "INR"
     assert prod.action == "buy"
     assert prod.category_l2 != "Unknown"
-    assert prod.extraction_confidence >= 0.80
+    bare = process("Sponsored 4.7 out of 5 stars iPhone 15 (128 GB) FREE delivery Buy Now", app_source="amazon_in")
+    assert prod.extraction_confidence > bare.extraction_confidence
+    assert 0.0 < prod.extraction_confidence < 1.0
 
 
 def test_process_empty():

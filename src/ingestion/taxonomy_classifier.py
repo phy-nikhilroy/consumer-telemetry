@@ -275,7 +275,8 @@ class SupervisedTaxonomyClassifier:
         """
         if not product_title or not product_title.strip():
             result = _unknown()
-            result.update({"method": METHOD_SUPERVISED, "model_abstained": True, "model_label": None})
+            result.update({"method": METHOD_SUPERVISED, "model_abstained": True, "model_label": None,
+                           "model_assigned_probability": 0.0})
             return result
         query = f"{brand} {product_title}".strip() if brand else product_title.strip()
         probs = self.predict_proba([query])[0]
@@ -296,17 +297,21 @@ class SupervisedTaxonomyClassifier:
                 "method": METHOD_SUPERVISED,
                 "model_abstained": False,
                 "model_label": label,
+                "model_assigned_probability": round(top, 4),
             }
 
         fallback = self.prototype.classify_product(product_title, brand, min_similarity=min_similarity)
         extra = {"method": METHOD_FALLBACK, "model_abstained": True, "model_label": label,
-                 "model_confidence": round(top, 4)}
+                 "model_confidence": round(top, 4), "model_margin": round(top - second, 4), "model_assigned_probability": 0.0}
         if fallback.get("abstained"):
             result = _unknown(float(fallback.get("confidence", 0.0)), float(fallback.get("margin", 0.0)),
                               fallback.get("nearest_category"))
             result.update(extra)
             return result
         l1, l2 = PROTOTYPE_TO_AMAZON.get(fallback["category_l2"], (fallback["category_l1"], fallback["category_l2"]))
+        assigned = f"{l1}{LABEL_SEPARATOR}{l2}"
+        if assigned in self.labels:
+            extra["model_assigned_probability"] = round(float(probs[self.labels.index(assigned)]), 4)
         result = dict(fallback)
         result.update({"category_l1": l1, "category_l2": l2, "full_category": f"{l1}{LABEL_SEPARATOR}{l2}"})
         result.update(extra)

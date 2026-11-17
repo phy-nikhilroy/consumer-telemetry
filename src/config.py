@@ -184,3 +184,11 @@ TAXONOMY_TUNE_ROWS = 20_000
 TAXONOMY_TARGET_ACCURACY = 0.85
 TAXONOMY_TAU_GRID = tuple(round(0.05 * i, 2) for i in range(1, 20))
 TAXONOMY_TAU_FALLBACK = 0.95
+
+
+# Learned extraction confidence (src/ingestion/confidence_model.py).
+CONFIDENCE_ARTIFACT_PATH = PROJECT_ROOT / "src" / "ingestion" / "artifacts" / "confidence_lr.joblib"
+CONFIDENCE_TRAIN_ROWS = 8_000
+CONFIDENCE_EVAL_ROWS = 3_000
+CONFIDENCE_PRICE_TOLERANCE = 0.01
+CONFIDENCE_ECE_BINS = 10

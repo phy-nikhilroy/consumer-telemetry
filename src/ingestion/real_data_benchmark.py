@@ -425,6 +425,22 @@ def benchmark_full_pipeline(
     }
 
 
+def evaluate_learned_confidence(n_rows: int = 3000) -> Dict[str, Any]:
+    """
+    ECE and AUC of the learned and the hand-weighted confidence on `n_rows` tune rows and
+    `n_rows` held-out rows. This is the only place that names the held-out split; the tuned
+    shard is excluded from it by `load_split`.
+    """
+    from src.config import AMAZON_SHARDS, AMAZON_TUNED_SHARD
+    from src.ingestion.confidence_model import evaluate_confidence
+
+    held_shards = [k for k in AMAZON_SHARDS if k != AMAZON_TUNED_SHARD]
+    return {
+        "tune": evaluate_confidence("tune", n_rows=n_rows),
+        "heldout": evaluate_confidence("heldout", shards=held_shards, n_rows=n_rows),
+    }
+
+
 def print_report(fields: Dict[str, Any], pipeline: Dict[str, Any]) -> None:
     """Prints the benchmark results as a readable report."""
     print("=" * 72)

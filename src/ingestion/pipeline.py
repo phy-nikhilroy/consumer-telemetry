@@ -28,6 +28,7 @@ from src.ingestion.ner_extractor import (
 )
 from src.ingestion.taxonomy_classifier import METHOD_SUPERVISED, classify_product
 from src.ingestion.entity_resolver import compute_canonical_key, compute_canonical_name
+from src.ingestion.confidence_model import predict_confidence
 from src.ingestion.segmenter import segment_screen
 
 if TYPE_CHECKING:
@@ -54,6 +55,9 @@ class ExtractedProduct(BaseModel):
     action: str = "view"
     brand_source: Optional[str] = None
     category_similarity: float = 0.0
+    category_probability: float = 0.0
+    category_model_margin: float = 0.0
+    category_method: Optional[str] = None
     price_verified: bool = False
     extraction_confidence: float = 0.0
     is_focal: bool = False
@@ -118,7 +122,52 @@ def price_is_verified(price: Optional[float], ner_amounts: List[float]) -> bool:
     return any(abs(amount - float(price)) < 0.01 for amount in ner_amounts)
 
 
-def calculate_extraction_confidence(extracted: Dict[str, Any]) -> float:
+def model_probability_and_margin(taxonomy_info: Dict[str, Any]) -> tuple[float, float]:
+    """
+    The supervised model's probability of the category actually assigned, and its top-minus-
+    second margin, on one scale whichever path answered. Zero for the prototype-only path,
+    for an empty title, and for a fallback whose label the model does not know.
+    """
+    probability = float(taxonomy_info.get("model_assigned_probability", 0.0))
+    if taxonomy_info.get("method") == METHOD_SUPERVISED:
+        return probability, float(taxonomy_info.get("margin", 0.0))
+    return probability, float(taxonomy_info.get("model_margin", 0.0))
+
+
+def calculate_extraction_confidence(extracted: Dict[str, Any], artifact_path: Optional[Path] = None) -> float:
+    """
+    Returns the learned model probability when the confidence artifact exists (at
+    `artifact_path`, default `config.CONFIDENCE_ARTIFACT_PATH`), otherwise the hand-weighted
+    score. A record with no extracted evidence at all scores 0.0 either way.
+    """
+    hand = calculate_hand_weighted_confidence(extracted)
+    if hand == 0.0 and not extracted.get("brand") and extracted.get("price") is None:
+        return 0.0
+    learned = predict_confidence(extracted, artifact_path)
+    return hand if learned is None else learned
+
+
+def product_to_evidence(product: "ExtractedProduct") -> Dict[str, Any]:
+    """The confidence inputs of an extracted product, with the category margin."""
+    return {
+        "brand": product.brand,
+        "brand_source": product.brand_source,
+        "product_title": product.product_title,
+        "price": product.price,
+        "price_verified": product.price_verified,
+        "currency": product.currency,
+        "rating": product.rating,
+        "category_l2": product.category_l2,
+        "full_category": product.full_category,
+        "category_similarity": product.category_similarity,
+        "category_probability": product.category_probability,
+        "category_model_margin": product.category_model_margin,
+        "category_abstained": product.category_l2 == "Unknown",
+        "category_method": product.category_method,
+    }
+
+
+def calculate_hand_weighted_confidence(extracted: Dict[str, Any]) -> float:
     """
     Scores how far an extracted record can be trusted, from 0.0 to 1.0.
 
@@ -200,6 +249,7 @@ def process(
 
     # 5. Extraction confidence
     category_similarity = float(taxonomy_info.get("confidence", 0.0))
+    category_probability, category_model_margin = model_probability_and_margin(taxonomy_info)
     extraction_data = {
         "brand": brand,
         "brand_source": brand_source,
@@ -210,6 +260,8 @@ def process(
         "rating": rating_info.get("rating"),
         "category_l2": taxonomy_info.get("category_l2"),
         "category_similarity": category_similarity,
+        "category_probability": category_probability,
+        "category_model_margin": category_model_margin,
         "category_abstained": taxonomy_info.get("abstained", False),
         "category_method": taxonomy_info.get("method"),
     }
@@ -238,6 +290,9 @@ def process(
         action=action,
         brand_source=brand_source,
         category_similarity=category_similarity,
+        category_probability=category_probability,
+        category_model_margin=category_model_margin,
+        category_method=taxonomy_info.get("method"),
         price_verified=price_verified,
         extraction_confidence=confidence,
         timestamp=timestamp
