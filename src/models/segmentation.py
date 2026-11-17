@@ -233,6 +233,36 @@ def gmm_bic_by_k(X: np.ndarray, k_values: Tuple[int, ...] = GMM_K_RANGE) -> Dict
     return out
 
 
+def _archetype_ari(
+    df: pl.DataFrame,
+    labels: np.ndarray,
+    features_dir: Optional[Union[str, Path]],
+    archetype_events_path: Optional[Union[str, Path]],
+) -> Optional[float]:
+    """
+    Adjusted Rand index between `labels` and the simulated archetype of every user, or
+    None when archetypes are unavailable for any user.
+
+    The CLV table only covers users who had purchased by its reference date, so it is
+    used only when it is complete; the simulator event log covers everyone.
+    """
+    if "archetype" in df.columns and df["archetype"].null_count() == 0:
+        truth = df["archetype"].to_list()
+    elif archetype_events_path is not None or features_dir is None:
+        from src.models.clv import load_user_archetypes
+
+        archetypes = load_user_archetypes(archetype_events_path)
+        if archetypes is None:
+            return None
+        lookup = dict(zip(archetypes["user_id"].to_list(), archetypes["archetype"].to_list()))
+        truth = [lookup.get(u) for u in df["user_id"].to_list()]
+        if any(t is None for t in truth):
+            return None
+    else:
+        return None
+    return float(adjusted_rand_score(truth, labels))
+
+
 def scale_features(
     df: pl.DataFrame,
     feature_names: Optional[List[str]] = None,
@@ -707,9 +737,15 @@ def run_segmentation_pipeline(
     output_path: Optional[Union[str, Path]] = None,
     features_dir: Optional[Union[str, Path]] = None,
     artifacts_dir: Optional[Union[str, Path]] = None,
+    archetype_events_path: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Runs cluster selection, fits both clusterers, profiles and names the segments.
+
+    `ari_vs_archetype` compares the KMeans labels with simulator ground truth. Archetypes
+    come from the CLV table when it covers every user; otherwise they are read from the
+    simulator event log, under the CLV module's rule: only for the default synthetic
+    dataset (no `features_dir`) or when `archetype_events_path` names a log explicitly.
 
     `features_dir` reads the train matrix and CLV table from another dataset's feature
     directory and writes the segment table there; `artifacts_dir` redirects the model,
@@ -849,9 +885,7 @@ def run_segmentation_pipeline(
 
     bic = gmm_bic_by_k(X)
     stability = bootstrap_stability(X, kmeans_labels, best_k)
-    ari = None
-    if "archetype" in df.columns and df["archetype"].null_count() == 0:
-        ari = float(adjusted_rand_score(df["archetype"].to_list(), kmeans_labels))
+    ari = _archetype_ari(df, kmeans_labels, features_dir, archetype_events_path)
 
     payload = {
         "n_users": int(X.shape[0]),
