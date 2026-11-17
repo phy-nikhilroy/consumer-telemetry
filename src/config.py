@@ -5,7 +5,7 @@ Central project configuration, filesystem paths, and global parameters.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, Optional, Tuple, Union
 
 # Base paths
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -122,3 +122,12 @@ def rebase_path(default: Path, directory: Optional[Union[str, Path]] = None) -> 
     if directory is None:
         return default
     return Path(directory) / default.name
+
+
+# Catalog price tiers in INR (lower bound inclusive, upper bound exclusive). Shared by the
+# simulator and the family catalog; kept here so importing the catalog stays cheap.
+PRICE_TIERS: Dict[str, Tuple[float, float]] = {
+    "budget": (0.0, 10_000.0),
+    "mid": (10_000.0, 50_000.0),
+    "premium": (50_000.0, float("inf")),
+}

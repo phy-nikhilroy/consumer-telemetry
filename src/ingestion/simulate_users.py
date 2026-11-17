@@ -31,7 +31,7 @@ import polars as pl
 
 from src.features.database import DatabaseManager, DEFAULT_DB_PATH
 from src.ingestion.pipeline import process
-from src.config import RANDOM_SEED, USD_TO_INR_RATE
+from src.config import PRICE_TIERS, RANDOM_SEED, USD_TO_INR_RATE
 from src.ingestion.synthetic_data import CATALOG, _format_inr, generate_app_screen_text
 
 # 5 User Behavioral Archetypes
@@ -114,11 +114,6 @@ DORMANCY_ONSET_RANGE = (8, 24)
 # affinity makes spend a persistent customer trait, as it is in reality: a budget
 # accessories buyer and a flagship phone buyer are different customers, not the same
 # customer on different days.
-PRICE_TIERS: Dict[str, Tuple[float, float]] = {
-    "budget": (0.0, 10_000.0),
-    "mid": (10_000.0, 50_000.0),
-    "premium": (50_000.0, float("inf")),
-}
 
 # Probability that a user picks a product from their own price tier.
 TIER_AFFINITY = 0.78
