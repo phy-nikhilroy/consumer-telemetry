@@ -65,6 +65,7 @@ from src.config import (
     rebase_path,
 )
 from src.features.feature_store import fill_missing_features, get_modeling_groups
+from src.models.baselines import baseline_report, bootstrap_metric_ci
 from src.models.propensity import grouped_validation_split
 
 MULTICLASS_LABELS: Tuple[str, ...] = ("no_purchase", "bought_on_dominant_app", "switched_app")
@@ -498,20 +499,11 @@ def bootstrap_auc_ci(
     alpha: float = 0.05,
     random_state: int = RANDOM_SEED,
 ) -> List[float]:
-    """Percentile bootstrap confidence interval for ROC-AUC; [nan, nan] if undefined."""
-    y = np.asarray(y)
-    score = np.asarray(score)
-    rng = np.random.default_rng(random_state)
-    stats: List[float] = []
-    for _ in range(n_boot):
-        idx = rng.integers(0, len(y), len(y))
-        if len(np.unique(y[idx])) < 2:
-            continue
-        stats.append(float(roc_auc_score(y[idx], score[idx])))
-    if not stats:
-        return [float("nan"), float("nan")]
-    lo, hi = np.percentile(stats, [100 * alpha / 2, 100 * (1 - alpha / 2)])
-    return [float(lo), float(hi)]
+    """ROC-AUC percentile bootstrap CI via the shared `bootstrap_metric_ci`; [nan, nan] if undefined."""
+    ci = bootstrap_metric_ci(
+        y, score, roc_auc_score, n_boot=n_boot, seed=random_state, alpha=alpha
+    )
+    return [ci["lo"], ci["hi"]]
 
 
 def evaluate_conditional_switching(
@@ -682,7 +674,14 @@ def run_switching_pipeline(
         "binary_target": SWITCHING_TARGET,
         "feature_names": feature_names,
         "binary_train": {k: v for k, v in binary_train_metrics.items() if k != "classification_report"},
-        "binary_test": {k: v for k, v in binary_test_metrics.items() if k != "classification_report"},
+        "binary_test": {
+            **{k: v for k, v in binary_test_metrics.items() if k != "classification_report"},
+            **baseline_report(
+                y_bin_test,
+                binary_model.predict_proba(X_test)[:, 1],
+                X_train, y_bin_train, X_test, feature_names,
+            ),
+        },
         "binary_test_tuned_threshold": {
             k: v for k, v in binary_test_tuned.items() if k != "classification_report"
         },

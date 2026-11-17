@@ -46,6 +46,7 @@ from src.config import (
     rebase_path,
 )
 from src.features.feature_store import get_modeling_groups, get_modeling_matrices
+from src.models.baselines import baseline_report
 
 # Conservative hyperparameters. The modeling matrix is a few hundred rows wide by
 # roughly 18 features, so shallow trees and strong regularization matter more than
@@ -326,7 +327,13 @@ def run_training_pipeline(
         "target": target_col,
         "feature_names": feature_names,
         "train": {k: v for k, v in train_metrics.items() if k != "classification_report"},
-        "test": {k: v for k, v in test_metrics.items() if k != "classification_report"},
+        "test": {
+            **{k: v for k, v in test_metrics.items() if k != "classification_report"},
+            **baseline_report(
+                y_test, model.predict_proba(X_test)[:, 1],
+                X_train, y_train, X_test, feature_names,
+            ),
+        },
     }
     with open(m_out, "w", encoding="utf-8") as f:
         json.dump(serializable, f, indent=2)
