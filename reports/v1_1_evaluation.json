@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "release": "1.1",
+  "generated_at": "2026-11-17T13:42:06+00:00",
+  "git_commit": "d4d583a",
+  "seed": 42,
+  "results": {
+    "propensity_test": {
+      "n_samples": 400,
+      "positive_rate": 0.4025,
+      "roc_auc": 0.8765300553548689,
+      "pr_auc": 0.8032353018610005,
+      "f1": 0.8011363636363636,
+      "log_loss": 0.43067388232737086,
+      "brier_score": 0.13510032216016532,
+      "threshold": 0.5,
+      "confusion_matrix": {
+        "true_negative": 189,
+        "false_positive": 50,
+        "false_negative": 20,
+        "true_positive": 141
+      },
+      "best_iteration": 80,
+      "ci": {
+        "roc_auc": {
+          "point": 0.8765300553548689,
+          "lo": 0.8396846833256452,
+          "hi": 0.9085943883869193
+        },
+        "pr_auc": {
+          "point": 0.8032353018610005,
+          "lo": 0.73836427613433,
+          "hi": 0.8612255175705842
+        }
+      },
+      "baselines": {
+        "logistic": {
+          "roc_auc": 0.8890563684087424,
+          "pr_auc": 0.8181815645773495
+        },
+        "single_feature": {
+          "feature": "total_purchases_30d",
+          "roc_auc": 0.8118844044803659,
+          "pr_auc": 0.7270671538215228
+        }
+      },
+      "delta_vs_logistic": {
+        "delta": -0.012526313053873417,
+        "lo": -0.02761065167550452,
+        "hi": 0.00256317355834445
+      },
+      "delta_vs_single_feature": {
+        "delta": 0.06464565087450302,
+        "lo": 0.03280173656071674,
+        "hi": 0.09553276726688621
+      }
+    },
+    "switching_binary_test": {
+      "n_samples": 400,
+      "positive_rate": 0.26,
+      "roc_auc": 0.8035667879417879,
+      "pr_auc": 0.5826630151437612,
+      "f1": 0.5821596244131455,
+      "accuracy": 0.7775,
+      "log_loss": 0.46611963194405986,
+      "confusion_matrix": {
+        "true_negative": 249,
+        "false_positive": 47,
+        "false_negative": 42,
+        "true_positive": 62
+      },
+      "ci": {
+        "roc_auc": {
+          "point": 0.8035667879417879,
+          "lo": 0.7516911933161955,
+          "hi": 0.8488115358802893
+        },
+        "pr_auc": {
+          "point": 0.5826630151437612,
+          "lo": 0.4844025611390834,
+          "hi": 0.6807861887178712
+        }
+      },
+      "baselines": {
+        "logistic": {
+          "roc_auc": 0.8168529106029105,
+          "pr_auc": 0.5556528599547909
+        },
+        "single_feature": {
+          "feature": "total_purchases_30d",
+          "roc_auc": 0.7450786122661124,
+          "pr_auc": 0.4589868250148847
+        }
+      },
+      "delta_vs_logistic": {
+        "delta": -0.013286122661122612,
+        "lo": -0.0389893507699406,
+        "hi": 0.011428113240586167
+      },
+      "delta_vs_single_feature": {
+        "delta": 0.05848817567567555,
+        "lo": 0.018107635428083982,
+        "hi": 0.10027631734971479
+      }
+    },
+    "switching_conditional_test": {
+      "n_samples": 161,
+      "positive_rate": 0.6459627329192547,
+      "roc_auc": 0.6740890688259109,
+      "pr_auc": 0.741037236067759,
+      "ci": [
+        0.5809607223327565,
+        0.7544020907700153
+      ],
+      "baseline_dominant_share_auc": 0.7311909581646424,
+      "delta_vs_baseline": -0.057101889338731504
+    }
+  },
+  "tripwire_notes": []
+}
