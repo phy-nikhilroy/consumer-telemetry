@@ -38,6 +38,7 @@ from src.config import (
 from src.features.behavioral_features import compute_behavioral_features
 from src.features.feature_store import fill_missing_features
 from src.features.rfm_features import compute_rfm_features
+from src.models.segmentation import SEGMENTATION_LOG_FEATURES, apply_log_transform
 from src.models.clv import build_rfm_summary, load_purchase_transactions, predict_clv
 
 PROPENSITY_METRICS_PATH = ARTIFACTS_DIR / "propensity_metrics.json"
@@ -88,6 +89,9 @@ class ModelRegistry:
         self.segmentation_scaler = joblib.load(path(SEGMENTATION_SCALER_PATH))
         segmentation_summary = _read_json(path(SEGMENTATION_SUMMARY_PATH))
         self.segmentation_features: List[str] = segmentation_summary["feature_names"]
+        self.segmentation_log_features: List[str] = segmentation_summary.get(
+            "log_features", list(SEGMENTATION_LOG_FEATURES)
+        )
         self.segmentation_recency_fill: Dict[str, float] = segmentation_summary.get("recency_fill_values", {})
         self.segment_names: Dict[int, str] = {
             int(s["cluster"]): s["name"] for s in segmentation_summary["segments"]
@@ -155,6 +159,7 @@ class UserScorer:
         raw = fill_missing_features(
             features, names, recency_fill=self.registry.segmentation_recency_fill
         ).to_numpy().astype(np.float64)
+        raw = apply_log_transform(raw, names, self.registry.segmentation_log_features)
         clusters = self.registry.segmentation_model.predict(self.registry.segmentation_scaler.transform(raw))
         return [
             {

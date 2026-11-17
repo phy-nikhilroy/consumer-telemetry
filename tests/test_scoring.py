@@ -17,6 +17,7 @@ import numpy as np
 import polars as pl
 from polars.testing import assert_frame_equal
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from src.api.scoring import ModelRegistry, UserScorer, compute_user_features, format_reference, risk_segment
 from src.api.warehouse import ServingWarehouse
@@ -107,3 +108,89 @@ def test_lifetime_value_for_buyer_and_non_buyer(serving_db: Path, registry: Mode
         assert scorer.lifetime_value(warehouse.con, "window_only", reference) is None
     finally:
         warehouse.close()
+
+
+class _Recorder:
+    """Stands in for the scaler and model so the exact serving input can be inspected."""
+
+    def __init__(self) -> None:
+        self.raw = None
+
+    def transform(self, X):
+        self.raw = np.array(X, dtype=np.float64)
+        return self.raw
+
+    def predict(self, X):
+        return np.zeros(len(X), dtype=int)
+
+
+def _serving_matrix(registry: ModelRegistry, features: pl.DataFrame) -> np.ndarray:
+    """Runs UserScorer.segments with recorders in place and returns what the scaler received."""
+    recorder = _Recorder()
+    saved = (registry.segmentation_scaler, registry.segmentation_model)
+    registry.segmentation_scaler, registry.segmentation_model = recorder, recorder
+    try:
+        UserScorer(registry).segments(features)
+    finally:
+        registry.segmentation_scaler, registry.segmentation_model = saved
+    return recorder.raw
+
+
+def _warehouse_features(tiny_warehouse: Path) -> pl.DataFrame:
+    con = duckdb.connect(str(tiny_warehouse), read_only=True)
+    try:
+        return compute_user_features(con, REFERENCE)
+    finally:
+        con.close()
+
+
+def test_segment_log_transform_matches_batch_scale_features(tiny_warehouse: Path, registry: ModelRegistry):
+    """What the serving scaler receives equals the batch pipeline's log-transformed, filled input."""
+    from src.models.segmentation import scale_features
+
+    features = _warehouse_features(tiny_warehouse)
+    names = registry.segmentation_features
+    batch_X, _, batch_scaler = scale_features(
+        features, names, recency_fill=registry.segmentation_recency_fill
+    )
+    serving_raw = _serving_matrix(registry, features)
+    np.testing.assert_allclose(
+        serving_raw, batch_scaler.inverse_transform(batch_X), rtol=1e-9, atol=1e-9
+    )
+
+
+def test_segment_log_transform_applied_to_listed_columns_only(tiny_warehouse: Path, registry: ModelRegistry):
+    from src.features.feature_store import fill_missing_features
+    from src.models.segmentation import SEGMENTATION_LOG_FEATURES
+
+    features = _warehouse_features(tiny_warehouse)
+    names = registry.segmentation_features
+    raw = fill_missing_features(
+        features, names, recency_fill=registry.segmentation_recency_fill
+    ).to_numpy().astype(np.float64)
+    serving_raw = _serving_matrix(registry, features)
+    for i, name in enumerate(names):
+        expected = np.log1p(raw[:, i]) if name in SEGMENTATION_LOG_FEATURES else raw[:, i]
+        np.testing.assert_allclose(serving_raw[:, i], expected, rtol=1e-9, atol=1e-12, err_msg=name)
+
+
+@settings(max_examples=30, deadline=None)
+@given(
+    st.lists(
+        st.floats(min_value=0.0, max_value=1e6, allow_nan=False, allow_infinity=False),
+        min_size=1, max_size=6,
+    )
+)
+def test_segment_log_transform_property_for_any_nonnegative_counts(registry: ModelRegistry, values):
+    """For every non-negative input, serving's scaler input equals log1p on the log columns."""
+    from src.models.segmentation import SEGMENTATION_LOG_FEATURES
+
+    names = registry.segmentation_features
+    frame = pl.DataFrame(
+        {"user_id": [f"u{i}" for i in range(len(values))]}
+        | {n: [float(v) for v in values] for n in names}
+    )
+    serving_raw = _serving_matrix(registry, frame)
+    for i, name in enumerate(names):
+        if name in SEGMENTATION_LOG_FEATURES:
+            np.testing.assert_allclose(serving_raw[:, i], np.log1p(np.array(values)), rtol=1e-9)

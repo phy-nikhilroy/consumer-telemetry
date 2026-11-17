@@ -25,7 +25,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 # Ensure consumer-telemetry root is on sys.path for direct script execution
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -41,7 +41,9 @@ import numpy as np
 import polars as pl
 from sklearn.cluster import HDBSCAN, KMeans
 from sklearn.decomposition import PCA
+from sklearn.mixture import GaussianMixture
 from sklearn.metrics import (
+    adjusted_rand_score,
     calinski_harabasz_score,
     davies_bouldin_score,
     silhouette_score,
@@ -64,6 +66,19 @@ PCA_PLOT_PATH = ARTIFACTS_DIR / "segmentation_pca_scatter.png"
 PROFILE_PLOT_PATH = ARTIFACTS_DIR / "segmentation_cluster_profiles.png"
 SEGMENTATION_SUMMARY_PATH = ARTIFACTS_DIR / "segmentation_summary.json"
 SEGMENTATION_SCALER_PATH = ARTIFACTS_DIR / "segmentation_scaler.joblib"
+
+# Heavy-tailed count and money features compressed with np.log1p before scaling. Serving
+# applies the same transform, reading this list from segmentation_summary.json.
+SEGMENTATION_LOG_FEATURES: Tuple[str, ...] = (
+    "total_events_30d",
+    "total_purchases_30d",
+    "total_spend_30d",
+    "avg_order_value",
+    "cross_app_comparison_count",
+)
+
+BOOTSTRAP_MODELS = 20
+GMM_K_RANGE: Tuple[int, ...] = (3, 4, 5, 6, 7, 8)
 
 # Interpretable behavioral features used for clustering and profiling. These are chosen
 # for readability of the resulting segments rather than for predictive power.
@@ -180,6 +195,44 @@ def load_segmentation_data(
     return selected
 
 
+def apply_log_transform(
+    raw: np.ndarray,
+    names: List[str],
+    log_features: Optional[Sequence[str]] = None,
+) -> np.ndarray:
+    """Applies np.log1p to the `log_features` (default SEGMENTATION_LOG_FEATURES) columns in `names`."""
+    log_set = set(SEGMENTATION_LOG_FEATURES if log_features is None else log_features)
+    out = np.array(raw, dtype=np.float64, copy=True)
+    for i, name in enumerate(names):
+        if name in log_set:
+            out[:, i] = np.log1p(out[:, i])
+    return out
+
+
+def bootstrap_stability(X: np.ndarray, labels: np.ndarray, n_clusters: int,
+                        n_models: int = BOOTSTRAP_MODELS) -> float:
+    """
+    Mean ARI between the full-data labels and labels from KMeans models fitted on
+    bootstrap resamples, each predicting every user.
+    """
+    rng = np.random.default_rng(RANDOM_SEED)
+    scores: List[float] = []
+    for _ in range(n_models):
+        idx = rng.integers(0, X.shape[0], size=X.shape[0])
+        model = KMeans(n_clusters=n_clusters, random_state=RANDOM_SEED, n_init=10).fit(X[idx])
+        scores.append(float(adjusted_rand_score(labels, model.predict(X))))
+    return float(np.mean(scores))
+
+
+def gmm_bic_by_k(X: np.ndarray, k_values: Tuple[int, ...] = GMM_K_RANGE) -> Dict[str, float]:
+    """BIC of a full-covariance GaussianMixture for each k."""
+    out: Dict[str, float] = {}
+    for k in k_values:
+        gmm = GaussianMixture(n_components=k, covariance_type="full", random_state=RANDOM_SEED).fit(X)
+        out[str(k)] = float(gmm.bic(X))
+    return out
+
+
 def scale_features(
     df: pl.DataFrame,
     feature_names: Optional[List[str]] = None,
@@ -201,6 +254,7 @@ def scale_features(
     names = feature_names or [c for c in SEGMENTATION_FEATURES if c in df.columns]
     fills = recency_fill if recency_fill is not None else censored_recency_fill(df, names)
     raw = fill_missing_features(df, names, recency_fill=fills).to_numpy().astype(np.float64)
+    raw = apply_log_transform(raw, names)
 
     scaler = StandardScaler()
     scaled = scaler.fit_transform(raw)
@@ -793,8 +847,19 @@ def run_segmentation_pipeline(
         print("  clusterer. Agreement here means the unsupervised segments recovered the")
         print("  behavioral groups that actually generated the data.")
 
+    bic = gmm_bic_by_k(X)
+    stability = bootstrap_stability(X, kmeans_labels, best_k)
+    ari = None
+    if "archetype" in df.columns and df["archetype"].null_count() == 0:
+        ari = float(adjusted_rand_score(df["archetype"].to_list(), kmeans_labels))
+
     payload = {
         "n_users": int(X.shape[0]),
+        "log_features": list(SEGMENTATION_LOG_FEATURES),
+        "ari_vs_archetype": ari,
+        "bootstrap_stability": stability,
+        "gmm_bic_by_k": bic,
+        "gmm_best_k": int(min(bic, key=bic.get)),
         "feature_names": feature_names,
         "dropped_constant_features": dead_features,
         # Serving must fill missing recency with these exact values before applying the
