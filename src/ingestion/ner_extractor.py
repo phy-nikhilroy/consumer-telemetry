@@ -194,6 +194,68 @@ def _in_compatibility_context(doc: Any, start: int) -> bool:
     return any(tok.lower_ in COMPATIBILITY_CUES for tok in doc[window_start:start])
 
 
+# OCR confuses these digits with letters inside words ("App1e", "Sams0ng").
+_DIGIT_TO_LOOKALIKE = str.maketrans({"0": "o", "1": "l", "5": "s", "8": "b", "|": "l"})
+# The leading word for brand recovery may start with a digit OCR put in place of a letter
+# ("5amsung").
+RECOVERY_TOKEN_PATTERN = re.compile(r"^[\W_]*([A-Za-z0-9][\w&'\-\.]*)")
+# Fuzzy (one-edit) brand recovery only for brands this long: a one-edit near miss of a 2 or 3 letter
+# brand ("LX" for LG, "MSX" for MSI) is as likely another maker as a misread.
+BRAND_RECOVERY_MIN_LENGTH = 4
+
+
+def _within_one_edit(a: str, b: str) -> bool:
+    """Whether `a` and `b` differ by at most one insertion, deletion, or substitution."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) > len(b):
+        a, b = b, a
+    i = 0
+    while i < len(a) and a[i] == b[i]:
+        i += 1
+    if len(a) == len(b):
+        return a[i + 1:] == b[i + 1:]
+    return a[i:] == b[i + 1:]
+
+
+def _recover_known_brand(title_text: str) -> Optional[str]:
+    """
+    Recovers a known brand from an OCR-damaged leading word.
+
+    The word is first folded (digits read as the letters they resemble); an exact known
+    brand after folding is returned ("J8L" is JBL), otherwise the single known brand within
+    one edit of it. The one-edit step needs at least `BRAND_RECOVERY_MIN_LENGTH`
+    characters in both the word and the brand. Generic or device-line words are never
+    recovered.
+    """
+    match = RECOVERY_TOKEN_PATTERN.match(title_text)
+    if not match:
+        return None
+    lowered = match.group(1).rstrip(".-'").lower()
+    folded = lowered.translate(_DIGIT_TO_LOOKALIKE)
+    if (
+        # A brand spelled correctly was already judged by the matcher (and possibly
+        # rejected as a compatibility target); recovery must not readmit it.
+        lowered in _known_brands
+        or len(folded) < 2
+        or not folded.isalpha()
+        or folded in GENERIC_LEADING_WORDS
+        or folded in DEVICE_LINE_WORDS
+    ):
+        return None
+    if folded in _known_brands:
+        return _known_brands[folded]
+    if len(folded) < BRAND_RECOVERY_MIN_LENGTH:
+        return None
+    candidates = [
+        name for key, name in _known_brands.items()
+        if len(key) >= BRAND_RECOVERY_MIN_LENGTH and key.isalpha() and _within_one_edit(folded, key)
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _leading_token_brand(title_text: str) -> Optional[str]:
     """
     Reads the leading word of a listing title as an open-vocabulary brand guess.
@@ -280,6 +342,10 @@ def extract_brand_with_source(text: str) -> Tuple[Optional[str], Optional[str]]:
 
     if leading_match:
         return leading_match, BRAND_SOURCE_LEADING_MATCH
+
+    recovered = _recover_known_brand(title_text)
+    if recovered:
+        return recovered, BRAND_SOURCE_LEADING_MATCH
 
     # A known brand that appears only mid-title is usually the device an accessory is
     # for, even without an explicit cue ("Bonoma Samsung Galaxy S8 Case"). On real

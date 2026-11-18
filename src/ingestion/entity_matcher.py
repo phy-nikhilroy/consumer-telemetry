@@ -202,21 +202,92 @@ def _jaccard(a: FrozenSet[str], b: FrozenSet[str]) -> float:
     return len(a & b) / len(a | b)
 
 
+# OCR confuses each group with one another; matching compares names with every member of a
+# group mapped to one representative, so "8lue" and "Blue", "App1e" and "Apple" agree.
+_OCR_FOLD = str.maketrans({"o": "0", "l": "1", "i": "1", "|": "1", "s": "5", "b": "8"})
+# Tokens at least this long may differ by one OCR substitution and still count as the same.
+OCR_EDIT_MIN_LENGTH = 4
+
+
+def ocr_fold(text: str) -> str:
+    """Lower-cases `text` and maps OCR-confusable characters to one representative each."""
+    return (text or "").lower().translate(_OCR_FOLD)
+
+
+def _char_trigrams(text: str) -> FrozenSet[str]:
+    """Character trigrams of the folded name with whitespace removed."""
+    flat = "".join(ocr_fold(text).split())
+    if len(flat) < 3:
+        return frozenset({flat}) if flat else frozenset()
+    return frozenset(flat[i:i + 3] for i in range(len(flat) - 2))
+
+
+def trigram_similarity(name_a: str, name_b: str) -> float:
+    """Jaccard of folded, space-free character trigrams; tolerant of merged or split tokens."""
+    return _jaccard(_char_trigrams(name_a), _char_trigrams(name_b))
+
+
+def _one_ocr_edit(a: str, b: str) -> bool:
+    """
+    Whether two folded tokens differ by exactly one substitution, insertion, or deletion
+    that is not one digit replaced by another (a digit swap is a different model number).
+    """
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        diffs = [(x, y) for x, y in zip(a, b) if x != y]
+        return len(diffs) == 1 and not (diffs[0][0].isdigit() and diffs[0][1].isdigit())
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    for i in range(len(long_)):
+        if long_[:i] + long_[i + 1:] == short:
+            return True
+    return False
+
+
+def _unexplained(only: Iterable[str], other_tokens: Iterable[str], other_flat: str) -> set:
+    """
+    The tokens of `only` that OCR noise cannot account for: a token is explained when its
+    folded form occurs inside the other name with spaces removed (a merged or split token),
+    or when it is one OCR edit from a token of the other name (both long enough).
+    """
+    other_folded = [ocr_fold(t) for t in other_tokens]
+    left = set()
+    for token in only:
+        folded = ocr_fold(token)
+        if folded in other_flat:
+            continue
+        if len(folded) >= OCR_EDIT_MIN_LENGTH and any(
+            len(o) >= OCR_EDIT_MIN_LENGTH and _one_ocr_edit(folded, o) for o in other_folded
+        ):
+            continue
+        left.add(token)
+    return left
+
+
 def variant_conflict(name_a: str, name_b: str) -> bool:
     """
     Whether two cleaned names disagree on a variant or a product line.
 
-    Capacity tokens are left to the capacity veto. Of the remaining tokens, a conflict is
-    both names carrying a token the other lacks (Black against Silver, UK 7 against UK 8),
-    or either carrying a line modifier the other lacks (Pro, Ultra). One name merely having
-    extra tokens is not a conflict: a listing often omits a colour or a spec.
+    Capacity tokens are left to the capacity veto. Tokens only one name carries are first
+    reduced to those OCR noise cannot explain (`_unexplained`: spacing or a one-character
+    misread). Of the rest, a conflict is both names keeping a token the other lacks (Black
+    against Silver, UK 7 against UK 8), either keeping a line modifier (Pro, Ultra), or
+    either keeping only bare numbers (SSD 1 against SSD 2, but not an omitted "UK 8").
+    One name merely having extra words is not a conflict: a listing often omits a colour
+    or a spec.
     """
     tokens_a = set(name_a.split()) - capacity_tokens(name_a)
     tokens_b = set(name_b.split()) - capacity_tokens(name_b)
-    only_a, only_b = tokens_a - tokens_b, tokens_b - tokens_a
+    flat_a, flat_b = ocr_fold("".join(name_a.split())), ocr_fold("".join(name_b.split()))
+    only_a = _unexplained(tokens_a - tokens_b, name_b.split(), flat_b)
+    only_b = _unexplained(tokens_b - tokens_a, name_a.split(), flat_a)
     if only_a and only_b:
         return True
-    return bool((only_a | only_b) & LINE_MODIFIERS)
+    if (only_a | only_b) & LINE_MODIFIERS:
+        return True
+    # A lone extra number is a different model (SSD 1 against SSD 2); a number that comes
+    # with a qualifier ("UK 8") is an omitted spec, which is not a conflict.
+    return any(side and all(t.isdigit() for t in side) for side in (only_a, only_b))
 
 
 class _EmbeddingCache:
@@ -265,8 +336,9 @@ def pair_score(a: dict, b: dict, encoder: Any) -> float:
     Scores how likely two extracted records are the same product, in [0, 1].
 
     0.0 when the brands differ (case-insensitive) or when both name capacities and the sets
-    differ. Otherwise 0.6 * cosine of the name embeddings + 0.4 * Jaccard of model tokens,
-    halved when both prices are present and differ by more than 40 percent, and halved
+    differ. Otherwise 0.6 * cosine of the name embeddings + 0.4 * the larger of the model
+    token Jaccard and the folded character trigram similarity (`trigram_similarity`, which
+    survives merged or split tokens and OCR lookalikes), halved when both prices are present and differ by more than 40 percent, and halved
     again when the names disagree on a variant (`variant_conflict`).
     """
     brand_a = (a.get("brand") or "").strip().lower()
@@ -279,7 +351,8 @@ def pair_score(a: dict, b: dict, encoder: Any) -> float:
         return 0.0
     cache = _cache_for(encoder)
     cosine = float(np.dot(cache.get(name_a), cache.get(name_b)))
-    score = EMBEDDING_WEIGHT * cosine + MODEL_TOKEN_WEIGHT * _jaccard(model_tokens(name_a), model_tokens(name_b))
+    token_term = max(_jaccard(model_tokens(name_a), model_tokens(name_b)), trigram_similarity(name_a, name_b))
+    score = EMBEDDING_WEIGHT * cosine + MODEL_TOKEN_WEIGHT * token_term
     price_a, price_b = _price_inr(a), _price_inr(b)
     if price_a is not None and price_b is not None and not are_prices_compatible(
         price_a, price_b, tolerance_pct=PRICE_TOLERANCE_PCT

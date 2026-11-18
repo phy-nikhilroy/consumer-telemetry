@@ -1,5 +1,6 @@
 import pytest
 from src.ingestion.regex_extractor import extract_price, extract_rating, extract_action
+from hypothesis import given, settings, strategies as st
 
 
 def test_extract_price_inr_basic():
@@ -181,3 +182,112 @@ def test_extract_price_unseparated_mrp_and_selling_price():
     assert res["price"] == 1299.99
     assert res["mrp"] == 1499.0
     assert res["discount_pct"] == 13
+
+
+# ---------------------------------------------------------------------------------------
+# OCR lookalike folding inside price tokens
+# ---------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Samsung Galaxy S24 ₹1,l9,900 Add to Cart", 119900.0),
+        ("Samsung Galaxy S24 ₹41,9O0 Add to Cart", 41900.0),
+        ("Samsung Galaxy S24 ₹36,S49 Add to Cart", 36549.0),
+        ("Samsung Galaxy S24 ₹13,S99 Add to Cart", 13599.0),
+        ("Samsung Galaxy S24 ₹1,I9,900 Add to Cart", 119900.0),
+        ("Samsung Galaxy S24 ₹1,|9,900 Add to Cart", 119900.0),
+        ("Samsung Galaxy S24 ₹41,9o0 Add to Cart", 41900.0),
+        ("Samsung Galaxy S24 ₹2,B9,990 Add to Cart", 289990.0),
+    ],
+)
+def test_extract_price_folds_ocr_lookalikes_in_inr(text: str, expected: float) -> None:
+    res = extract_price(text)
+    assert res["price"] == expected
+    assert res["currency"] == "INR"
+
+
+def test_extract_price_folds_lookalike_in_usd_token() -> None:
+    res = extract_price("boAt Airdopes 141 $2O.90 Add to Cart")
+    assert res["price"] == 20.90
+    assert res["currency"] == "USD"
+
+
+def test_extract_price_folds_lookalike_in_mrp_token() -> None:
+    res = extract_price("Sponsored Apple iPhone 15 ₹68,330 M.R.P: ₹75,9O0 (10% off) Buy Now")
+    assert res["price"] == 68330.0
+    assert res["mrp"] == 75900.0
+
+
+def test_extract_price_folds_lookalike_after_mrp_label_without_symbol() -> None:
+    res = extract_price("Sony WH-1000XM5 ₹29,990 M.R.P: 3l,990 Buy Now")
+    assert res["price"] == 29990.0
+    assert res["mrp"] == 31990.0
+
+
+@pytest.mark.parametrize(
+    "text, expected, currency",
+    [
+        ("Puma Sneaker ₹999 Sport Add to Cart", 999.0, "INR"),
+        ("Puma Sneaker ₹1,999 Sale Add to Cart", 1999.0, "INR"),
+        ("Gap Shirt $20 Off Add to Cart", 20.0, "USD"),
+        ("Gap Shirt $20 Ok Add to Cart", 20.0, "USD"),
+        ("Gap Shirt $20 Sold Out Add to Cart", 20.0, "USD"),
+        ("Puma Sneaker ₹4,500 Is the price Buy Now", 4500.0, "INR"),
+    ],
+)
+def test_extract_price_does_not_fold_lookalike_in_following_word(
+    text: str, expected: float, currency: str
+) -> None:
+    res = extract_price(text)
+    assert res["price"] == expected
+    assert res["currency"] == currency
+
+
+def test_extract_price_does_not_fold_trailing_lookalike_glued_to_digits_outside_token() -> None:
+    # The letter follows a space, so it belongs to the next word and adds no digit.
+    assert extract_price("Boat Rockerz ₹1,499 B Buy Now")["price"] == 1499.0
+
+
+def test_extract_price_without_currency_marker_does_not_fold() -> None:
+    # No marker precedes the token, so "l9,900" must not turn into a price of 19,900.
+    res = extract_price("Model l9,900 units sold")
+    assert res["price"] != 19900.0
+
+
+@pytest.mark.parametrize("price", ["1,19,900", "41,900", "36,549", "13,599", "999", "29,990.50"])
+def test_extract_price_clean_tokens_unchanged(price: str) -> None:
+    expected = float(price.replace(",", ""))
+    assert extract_price(f"Apple iPhone 15 ₹{price} Buy Now")["price"] == expected
+
+
+@given(
+    digits=st.lists(st.integers(0, 9), min_size=4, max_size=7),
+    data=st.data(),
+)
+@settings(max_examples=50, deadline=None)
+def test_extract_price_fold_roundtrip_property(digits, data) -> None:
+    """Replacing interior digits with their lookalikes never changes the parsed price."""
+    lookalike = {0: "O", 1: "l", 5: "S", 8: "B"}
+    truth = int("".join(map(str, digits)))
+    chars = [str(d) for d in digits]
+    # interior positions only, so the token still starts and ends on a real digit
+    for i in range(1, len(digits) - 1):
+        if digits[i] in lookalike and data.draw(st.booleans()):
+            chars[i] = lookalike[digits[i]]
+    body = "".join(chars)
+    assert extract_price(f"Sony Headphones ₹{body} Add to Cart")["price"] == float(truth)
+    assert extract_price(f"Sony Headphones ${body} Add to Cart")["price"] == float(truth)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Gap Shirt $20Off Add to Cart", 20.0),
+        ("Puma Sneaker ₹999Sport Add to Cart", 999.0),
+        ("Puma Sneaker ₹1,499Sale Add to Cart", 1499.0),
+    ],
+)
+def test_extract_price_does_not_fold_lookalike_glued_to_digits(text: str, expected: float) -> None:
+    """A word run straight into the number keeps its own letters; only the number is folded."""
+    assert extract_price(text)["price"] == expected

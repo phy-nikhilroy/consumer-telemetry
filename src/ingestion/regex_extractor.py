@@ -52,6 +52,45 @@ def _clean_number(val_str: str) -> float:
     return float(val_str.replace(",", "").strip())
 
 
+# OCR confuses these letters with digits inside prices ("₹1,l9,900", "₹36,S49").
+_LOOKALIKE_TO_DIGIT = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "|": "1", "S": "5", "B": "8"})
+_LOOKALIKE_CHARS = "OolI|SB"
+# A currency marker or an MRP-style label, then a token of digits, separators, and lookalikes.
+# The marker part is case-insensitive; the token class is not, so `s` and `b` never fold.
+PRICE_TOKEN_PATTERN = re.compile(
+    r"((?i:₹|\bRs\.?|\bINR\b|\$|\bUSD\b"
+    r"|(?:M\.?R\.?P\.?|List\s+Price|Was|Original\s+Price)[:\s]+(?:₹|Rs\.?|INR|\$|USD)?)\s*)"
+    r"([0-9OolI|SB][0-9OolI|SB,.]*)"
+)
+
+
+def _fold_price_token(match: "re.Match[str]") -> str:
+    """Folds OCR lookalikes to digits inside one price token, leaving following words intact."""
+    prefix, token = match.group(1), match.group(2)
+    following = match.string[match.end():match.end() + 1]
+    tail = ""
+    if following.isalpha():
+        # The token runs into a word ("$20Off"): its trailing lookalikes belong to that word.
+        cut = len(token)
+        while cut > 0 and (token[cut - 1] in _LOOKALIKE_CHARS or token[cut - 1] in ",."):
+            cut -= 1
+        token, tail = token[:cut], token[cut:]
+    if not any(c.isdigit() for c in token):
+        return prefix + token + tail
+    return prefix + token.translate(_LOOKALIKE_TO_DIGIT) + tail
+
+
+def fold_price_lookalikes(text: str) -> str:
+    """
+    Rewrites OCR letter-for-digit confusions inside price tokens: `O`/`o` to 0, `l`/`I`/`|`
+    to 1, `S` to 5, `B` to 8. Only a token after a currency marker or an M.R.P.-style label
+    that already holds a digit is changed, so words elsewhere are never altered.
+    """
+    if not text:
+        return text
+    return PRICE_TOKEN_PATTERN.sub(_fold_price_token, text)
+
+
 def extract_price(text: str) -> Dict[str, Any]:
     """
     Extracts price, currency, mrp, and discount_pct from noisy screen text.
@@ -65,6 +104,8 @@ def extract_price(text: str) -> Dict[str, Any]:
     """
     if not text:
         return {"price": None, "currency": None, "mrp": None, "discount_pct": None}
+
+    text = fold_price_lookalikes(text)
 
     # Determine currency
     currency = None
