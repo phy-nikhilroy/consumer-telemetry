@@ -7,7 +7,7 @@ those predictions live through an API and a dashboard.
 
 **Status:** version 1.0 is complete. Extraction, feature engineering, modeling, and the serving
 layer (API, live event stream, dashboard, Docker images and Compose stack) are built, tested with
-415 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
+592 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
 See [Project Status](#project-status), [Deployment](#deployment), and [Future Work](#future-work).
 
 ---
@@ -238,7 +238,7 @@ consumer-telemetry/
 │   ├── simulation/            # Phase 4: live event stream and terminal monitor
 │   └── dashboard/             # Phase 4: Streamlit dashboard
 ├── notebooks/                 # Executed analysis notebooks and the HTML evaluation report
-└── tests/                     # 38 test modules, 415 tests
+└── tests/                     # 49 test modules, 592 tests
 ```
 
 ### Module guide
@@ -256,6 +256,15 @@ consumer-telemetry/
 | `simulate_users.py` | Simulates multi-day, multi-app shoppers and reloads the warehouse |
 | `real_data_benchmark.py` | Scores extraction against real Amazon product listings |
 | `retailrocket_adapter.py` | Maps the RetailRocket clickstream onto this project's warehouse schema |
+| `catalog.py` | Expands 46 hand-authored product families into a larger SKU catalog with variants |
+| `screen_generator.py` | Renders multi-listing OCR-style screens from catalog items, with character noise |
+| `segmenter.py` | Splits one multi-listing screen into one text segment per listing |
+| `entity_matcher.py` | Wording-tolerant product matching; compares it with the v1.0 exact key |
+| `real_splits.py` | Deterministic train, tune, and held-out splits of the real Amazon shards |
+| `taxonomy_train.py` | Trains the supervised taxonomy model with calibrated abstention |
+| `confidence_model.py` | Learned extraction confidence, with expected calibration error and AUC |
+| `extraction_benchmark.py` | Throughput of `process` against `process_batch` |
+| `amazon_jsonl_shard.py` | Converts the Amazon Clothing JSONL metadata into a parquet shard |
 
 **`src/features/`**
 
@@ -992,6 +1001,73 @@ not a property of the data. Without the weight the model is also better ranked (
 against 0.865 to 0.867 with it), and every cell beats the single-feature baseline (0.714). The test split
 has only 58 buyers (0.90 percent), so differences between cells carry wide uncertainty.
 
+### Extraction on held-out real listings (v1.2)
+
+The extraction changes were measured on real listings that were never used for tuning. The tune
+split is one Amazon metadata shard (`meta_shard0`, 5,000 listings). The held-out split is three other
+shards (`meta_cell_shard1`, `meta_electronics_shard0`, `meta_fashion_shard0`, 15,000 listings). Rows are
+assigned to splits by a hash of `parent_asin` (`src/ingestion/real_splits.py`). The fashion shard is built
+from the first 180,000 lines of the Clothing JSONL, because the dataset has no Clothing parquet folder.
+Category labels come from the product-type node of each listing. The supervised taxonomy model
+(`src/ingestion/artifacts/taxonomy_lr.joblib`) abstains below a probability of 0.6, the threshold chosen
+to reach a target accuracy of 0.85 among confident rows. The v1.0 prototype answers for abstained rows,
+which the "final category" row counts. Source:
+`reports/v1_2_extraction.json`, `results.real`.
+
+| Metric | Tune (5,000 listings) | Held-out (15,000 listings) | Gap (tune minus held-out) |
+| :--- | :--- | :--- | :--- |
+| Brand accuracy | 0.630 | 0.597 | +0.033 |
+| Brand confidently wrong | 0.188 | 0.247 | -0.059 |
+| Price accuracy | 0.998 | 0.994 | +0.004 |
+| Rating accuracy | 1.000 | 1.000 | 0.000 |
+| Category accuracy among non-abstained (rows with a product-type label: tune 4,861, held-out 14,513) | 0.915 | 0.894 | +0.022 |
+| Abstain rate | 0.285 | 0.322 | -0.037 |
+| Final category accuracy | 0.655 | 0.664 | -0.009 |
+
+The held-out category accuracy among non-abstained rows is 0.894, and the held-out abstain rate is 0.322.
+
+Synthetic field accuracy by OCR noise rate (2,000 screens, 4,083 listings at each rate;
+`results.synthetic`). Segment count was correct for every screen at every rate:
+
+| Noise rate | Price accuracy | Brand accuracy | Segmentation accuracy |
+| :--- | :--- | :--- | :--- |
+| 0.00 | 1.000 | 0.970 | 1.000 |
+| 0.01 | 0.982 | 0.958 | 0.964 |
+| 0.02 | 0.968 | 0.948 | 0.935 |
+| 0.05 | 0.906 | 0.912 | 0.821 |
+
+Entity matching on labelled listing pairs (`reports/v1_2_entity_resolution.json`, `results.tune` and
+`results.test`; threshold 0.50, chosen on the tune families). The hard negatives are sibling variants of
+one product (another colour, storage, or size) that the matcher must keep apart:
+
+| Method | Split | Pairs (hard negatives) | F1 | Recall | Hard-negative false-match rate |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Matcher | test | 1,907 (598) | 0.9729 | 0.9513 | 0.0050 |
+| v1.0 exact key | test | 1,907 (598) | 0.5161 | 0.3559 | 0.0368 |
+| Matcher | tune | 2,093 (602) | 0.9728 | 0.9470 | 0.0000 |
+| v1.0 exact key | tune | 2,093 (602) | 0.4922 | 0.3295 | 0.0166 |
+
+These pairs are synthetic. Real-listing matching was not measured in v1.2.
+
+Learned extraction confidence against the v1.0 hand-weighted score (`reports/v1_2_extraction.json`,
+`results.confidence`; 3,000 rows per split). The learned model is a logistic regression
+(`src/ingestion/artifacts/confidence_lr.joblib`) trained on the train split. Lower ECE is better;
+higher AUC is better:
+
+| Split | Learned ECE | Hand-weighted ECE | Learned AUC | Hand-weighted AUC |
+| :--- | :--- | :--- | :--- | :--- |
+| Tune | 0.044 | 0.408 | 0.834 | 0.809 |
+| Held-out | 0.037 | 0.406 | 0.822 | 0.811 |
+
+Throughput on 5,000 synthetic events, batch size 256, on this machine (`results.throughput`):
+
+| Path | Events per second |
+| :--- | :--- |
+| `process` (one listing at a time) | 151.3 |
+| `process_batch` | 443.6 |
+
+`process_batch` is 2.93 times faster than `process` and returns the same output.
+
 ### What held up
 
 - **The infrastructure.** The warehouse, sessionization, feature store, and leakage-safe splits
@@ -1086,7 +1162,7 @@ only on simulated data.
 make test             # or: .venv/bin/pytest -v
 ```
 
-The suite has **415 tests across 38 modules** and runs in about four minutes (229 seconds in the v1.1 run). Serving tests run
+The suite has **592 tests across 49 modules** and runs in about four minutes (212 seconds in the v1.2 run). Serving tests run
 against a small simulated warehouse built in a temporary directory, never against the real
 warehouses. Beyond unit tests for each module, several tests guard properties that once broke,
 or could break, without any error:
