@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
-from typing import Any, Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 # Ensure the project root is on sys.path for direct script execution
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -25,7 +25,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, StandardScaler
 
-from src.config import RANDOM_SEED, RECENCY_FEATURES
+from src.config import BASELINE_BOOTSTRAP_SAMPLES, RANDOM_SEED, RECENCY_FEATURES
 
 RECENCY_CLIP_DAYS = 60.0
 DEFAULT_SINGLE_FEATURE = "total_purchases_30d"
@@ -139,13 +139,17 @@ def baseline_report(
     y_train: np.ndarray,
     X_test: np.ndarray,
     feature_names: Sequence[str],
-    n_boot: int = 2000,
+    n_boot: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Builds the `ci`, `baselines`, and delta blocks merged into the metrics JSON `test` entry.
 
+    `n_boot` defaults to `BASELINE_BOOTSTRAP_SAMPLES`, read at call time.
+
     The single-feature baseline is null when its feature is not in the model features.
     """
+    if n_boot is None:
+        n_boot = BASELINE_BOOTSTRAP_SAMPLES
     y_test = np.asarray(y_test)
     out: Dict[str, Any] = {
         "ci": {

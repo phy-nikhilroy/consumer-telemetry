@@ -25,6 +25,7 @@ DAYS = 30
 # extracted on load, so they use a short window. The seed_runs fixture keeps DAYS, which
 # the model chain needs.
 SIM_DAYS = 3
+FAST_BOOTSTRAP_SAMPLES = 100
 AGG_KEYS = {"mean", "std", "min", "max", "n"}
 
 
@@ -72,9 +73,13 @@ def seed_runs(tmp_path_factory: pytest.TempPathFactory) -> Dict[str, Any]:
     before = _listing(FEATURES_DIR, ARTIFACTS_DIR)
     # The repeated seed is the tiny warehouse's, so its screens are already extracted when
     # the session fixture ran first; the comparison is the same for any pair of seeds.
-    a1 = run_one_seed(RANDOM_SEED, root / "a1", USERS, DAYS)
-    a2 = run_one_seed(RANDOM_SEED, root / "a2", USERS, DAYS)
-    b = run_one_seed(2, root / "b", USERS, DAYS)
+    # These tests check isolation, determinism, and seed threading, not interval widths, so
+    # the baseline bootstrap runs with few resamples (it was over half of each run).
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("src.models.baselines.BASELINE_BOOTSTRAP_SAMPLES", FAST_BOOTSTRAP_SAMPLES)
+        a1 = run_one_seed(RANDOM_SEED, root / "a1", USERS, DAYS)
+        a2 = run_one_seed(RANDOM_SEED, root / "a2", USERS, DAYS)
+        b = run_one_seed(2, root / "b", USERS, DAYS)
     after = _listing(FEATURES_DIR, ARTIFACTS_DIR)
     return {"root": root, "a1": a1, "a2": a2, "b": b, "before": before, "after": after}
 

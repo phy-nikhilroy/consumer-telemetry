@@ -67,14 +67,17 @@ def isolated_run(tmp_path_factory):
     from src.models.segmentation import run_segmentation_pipeline
     from src.models.switching import run_switching_pipeline
 
-    run_feature_validation_pipeline(features_dir=features_dir)
-    run_training_pipeline(features_dir=features_dir, artifacts_dir=artifacts_dir)
-    run_evaluation_pipeline(features_dir=features_dir, artifacts_dir=artifacts_dir)
-    run_switching_pipeline(features_dir=features_dir, artifacts_dir=artifacts_dir)
-    run_clv_pipeline(features_dir=features_dir, artifacts_dir=artifacts_dir)
-    run_segmentation_pipeline(
-        k_values=(3, 4), features_dir=features_dir, artifacts_dir=artifacts_dir
-    )
+    # Only where files land is checked here, so the baseline bootstrap uses few resamples.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("src.models.baselines.BASELINE_BOOTSTRAP_SAMPLES", 100)
+        run_feature_validation_pipeline(features_dir=features_dir)
+        run_training_pipeline(features_dir=features_dir, artifacts_dir=artifacts_dir)
+        run_evaluation_pipeline(features_dir=features_dir, artifacts_dir=artifacts_dir)
+        run_switching_pipeline(features_dir=features_dir, artifacts_dir=artifacts_dir)
+        run_clv_pipeline(features_dir=features_dir, artifacts_dir=artifacts_dir)
+        run_segmentation_pipeline(
+            k_values=(3, 4), features_dir=features_dir, artifacts_dir=artifacts_dir
+        )
 
     after = _snapshot(FEATURES_DIR, ARTIFACTS_DIR)
     return before, after, features_dir, artifacts_dir

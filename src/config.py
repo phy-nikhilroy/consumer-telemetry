@@ -99,6 +99,8 @@ SWITCHING_TARGET = "will_switch_app_next_7d"
 COUNT_TARGET = "num_purchases_next_7d"
 SWITCHING_CONDITIONAL_TARGET = "switched_given_purchase"
 CONDITIONAL_BOOTSTRAP_SAMPLES = 500
+# Resamples behind the model-versus-baseline confidence intervals in every metrics file.
+BASELINE_BOOTSTRAP_SAMPLES = 2000
 TARGET_COLUMNS = (PRIMARY_TARGET, COUNT_TARGET, SWITCHING_TARGET)
 
 # Recency features measure days since a user last did something. A null means the user
