@@ -7,7 +7,7 @@ those predictions live through an API and a dashboard.
 
 **Status:** version 1.0 is complete. Extraction, feature engineering, modeling, and the serving
 layer (API, live event stream, dashboard, Docker images and Compose stack) are built, tested with
-592 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
+786 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
 See [Project Status](#project-status), [Deployment](#deployment), and [Future Work](#future-work).
 
 ---
@@ -170,9 +170,9 @@ Current simulated warehouse:
 | :--- | :--- |
 | Events | 138,242 |
 | Users | 400 |
-| Products | 17 |
+| Products | 162 |
 | Sessions | 79,105 |
-| Cross-app comparison sessions | 9,667 (across 397 users) |
+| Cross-app comparison sessions | 16,094 |
 
 To check that the code is not only learning its own simulator, the pipeline was also run on two
 real datasets. See [Real-World Validation](#real-world-validation).
@@ -238,7 +238,7 @@ consumer-telemetry/
 │   ├── simulation/            # Phase 4: live event stream and terminal monitor
 │   └── dashboard/             # Phase 4: Streamlit dashboard
 ├── notebooks/                 # Executed analysis notebooks and the HTML evaluation report
-└── tests/                     # 49 test modules, 592 tests
+└── tests/                     # 56 test modules, 786 tests
 ```
 
 ### Module guide
@@ -694,8 +694,8 @@ in `src/config.py`).
 | File | Contents |
 | :--- | :--- |
 | `rfm_features.parquet`, `behavioral_features.parquet` | Per-user feature blocks |
-| `train_features.parquet`, `test_features.parquet` | Modeling matrices: train has 800 rows and test has 400 rows, 37 columns each |
-| `selected_features.json` | 31 candidate features; each per-target list (`will_purchase_next_7d`, `will_switch_app_next_7d`, `switched_given_purchase`) holds all 31. No feature was dropped as zero-variance or collinear, and there is no top-k cut |
+| `train_features.parquet`, `test_features.parquet` | Modeling matrices: train has 800 rows and test has 400 rows, 39 columns each |
+| `selected_features.json` | 33 candidate features; each per-target list (`will_purchase_next_7d`, `will_switch_app_next_7d`, `switched_given_purchase`) holds all 33. No feature was dropped as zero-variance or collinear, and there is no top-k cut |
 | `user_clv.parquet` | Per-user lifetime value predictions |
 | `user_segments.parquet` | Per-user cluster and segment name |
 
@@ -741,43 +741,43 @@ purchase. The model is trained on two stacked reference dates (2026-10-06 and 20
 rows) and tested on 2026-10-20, with every target window ending before the test reference date.
 
 Headline over 5 simulation seeds (`reports/v1_1_seeds.json`, `results.aggregate.propensity.test`):
-ROC-AUC 0.868 +/- 0.019, PR-AUC 0.797 +/- 0.027.
+ROC-AUC 0.866 +/- 0.017, PR-AUC 0.802 +/- 0.025.
 
 Seed 42 test set (`src/models/artifacts/propensity_metrics.json`, block `test`):
 
 | Metric | Test value | 95% CI (bootstrap) |
 | :--- | :--- | :--- |
-| ROC-AUC | 0.877 | 0.840 to 0.909 |
-| PR-AUC | 0.803 | 0.738 to 0.861 |
-| F1 at 0.5 | 0.801 | not computed |
-| Brier score | 0.135 | not computed |
+| ROC-AUC | 0.872 | 0.835 to 0.906 |
+| PR-AUC | 0.809 | 0.749 to 0.865 |
+| F1 at 0.5 | 0.789 | not computed |
+| Brier score | 0.137 | not computed |
 
 Baselines, on the same test set. A difference is the model minus the baseline:
 
 | Baseline | ROC-AUC | PR-AUC | Difference in ROC-AUC (95% CI) |
 | :--- | :--- | :--- | :--- |
-| Logistic regression | 0.889 | 0.818 | -0.013 (-0.028 to 0.003) |
-| Single feature: `total_purchases_30d` | 0.812 | 0.727 | +0.065 (+0.033 to +0.096) |
+| Logistic regression | 0.888 | 0.815 | -0.015 (-0.032 to 0.000) |
+| Single feature: `total_purchases_30d` | 0.811 | 0.725 | +0.061 (+0.030 to +0.092) |
 
 The LightGBM model beats the single-feature baseline. Its difference from the logistic regression
 baseline is not significant: the interval includes zero.
 
 **Calibration** means a predicted 70% should come true about 70% of the time. The calibration
 method (sigmoid) was chosen by 5-fold grouped cross-validation on the training data only, against
-uncalibrated and isotonic. On the test set, calibration changes the Brier score from 0.1351 to 0.1345,
-ROC-AUC from 0.8765 to 0.8770, and log loss from 0.4307 to 0.4256. The mean predicted probability is
-0.4376 against an observed rate of 0.4025. Risk bands: low below 0.2368, high at or above 0.7127.
+uncalibrated and isotonic. On the test set, calibration changes the Brier score from 0.1370 to 0.1349,
+ROC-AUC from 0.8722 to 0.8732, and log loss from 0.4302 to 0.4246. The mean predicted probability is
+0.4253 against an observed rate of 0.4025. Risk bands: low below 0.2356, high at or above 0.6914.
 
 **Lift** shows how useful the ranking is for targeting:
 
 | Users targeted (highest scores first) | Share of all buyers reached |
 | :--- | :--- |
-| Top 10% | 21.7% |
-| Top 20% | 39.1% |
-| Top 30% | 56.5% |
+| Top 10% | 22.4% |
+| Top 20% | 41.0% |
+| Top 30% | 57.1% |
 
-The top 10% of users (40 of 400) bought at 2.17 times the average rate: 35 of the 40 made a purchase
-(87.5%). Source: `src/models/artifacts/propensity_evaluation_summary.json`.
+The top 10% of users (40 of 400) bought at 2.24 times the average rate: 36 of the 40 made a purchase
+(90.0%). Source: `src/models/artifacts/propensity_evaluation_summary.json`.
 
 ### App switching
 
@@ -785,39 +785,39 @@ Predicts whether the next purchase will happen on a different app than the user'
 26.0% of the 400 test users switched.
 
 Headline over 5 simulation seeds (`reports/v1_1_seeds.json`, `results.aggregate.switching.test`):
-ROC-AUC 0.811 +/- 0.026, PR-AUC 0.629 +/- 0.044.
+ROC-AUC 0.799 +/- 0.044, PR-AUC 0.590 +/- 0.062.
 
 Seed 42 test set (`src/models/artifacts/switching_metrics.json`, block `binary_test`):
 
 | Metric | Test value | 95% CI (bootstrap) |
 | :--- | :--- | :--- |
-| ROC-AUC | 0.804 | 0.752 to 0.849 |
-| PR-AUC | 0.583 | 0.484 to 0.681 |
-| F1 at 0.5 | 0.582 | not computed |
-| F1 at tuned threshold (0.38, tuned on training data) | 0.612 | not computed |
-| Three-class accuracy (no purchase / usual app / switched) | 0.720, macro F1 0.603 | not computed |
+| ROC-AUC | 0.798 | 0.746 to 0.846 |
+| PR-AUC | 0.548 | 0.453 to 0.661 |
+| F1 at 0.5 | 0.520 | not computed |
+| F1 at tuned threshold (0.38, tuned on training data) | 0.619 | not computed |
+| Three-class accuracy (no purchase / usual app / switched) | 0.698, macro F1 0.568 | not computed |
 
 Baselines, on the same test set. A difference is the model minus the baseline:
 
 | Baseline | ROC-AUC | PR-AUC | Difference in ROC-AUC (95% CI) |
 | :--- | :--- | :--- | :--- |
-| Logistic regression | 0.817 | 0.556 | -0.013 (-0.039 to 0.011) |
-| Single feature: `total_purchases_30d` | 0.745 | 0.459 | +0.058 (+0.018 to +0.100) |
+| Logistic regression | 0.823 | 0.578 | -0.025 (-0.052 to 0.002) |
+| Single feature: `total_purchases_30d` | 0.742 | 0.455 | +0.056 (+0.018 to +0.094) |
 
-The buyers-only conditional model (`conditional_test`, 161 test users who bought) has ROC-AUC 0.674
-(95% CI 0.581 to 0.754). Its baseline, the dominant-app share, reaches 0.731, so the conditional
-model is 0.057 below that baseline.
+The buyers-only conditional model (`conditional_test`, 161 test users who bought) has ROC-AUC 0.716
+(95% CI 0.627 to 0.795). Its baseline, the dominant-app share, reaches 0.731, so the conditional
+model is 0.016 below that baseline.
 
 SHAP shows what drives switching (`top_shap_drivers` in `switching_metrics.json`; the chart is
 `switching_shap_importance.png`):
 
 | Rank | Feature | Mean absolute SHAP | Effect |
 | :--- | :--- | :--- | :--- |
-| 1 | View-to-cart ratio | 0.585 | Increases switching |
-| 2 | Days since last cart add | 0.203 | Reduces switching |
-| 3 | App entropy | 0.179 | Increases switching |
-| 4 | Sessions in the last 7 days | 0.129 | Increases switching |
-| 5 | Days since last event | 0.122 | Reduces switching |
+| 1 | View-to-cart ratio | 0.570 | Increases switching |
+| 2 | Days since last cart add | 0.151 | Reduces switching |
+| 3 | App entropy | 0.138 | Increases switching |
+| 4 | Days since last event | 0.136 | Reduces switching |
+| 5 | Sessions in the last 7 days | 0.128 | Increases switching |
 
 ### Customer lifetime value
 
@@ -828,25 +828,25 @@ Gamma-Gamma estimates how much each purchase will be worth. Together they predic
 | :--- | :--- |
 | Reference date | 2026-10-20 (the test reference date; the CLV model is cut here) |
 | Horizon | 30 days |
-| Customers modeled | 297 (237 repeat buyers, 1,702 transactions) |
-| Mean predicted 30-day CLV | INR 178,214 |
-| Median predicted 30-day CLV | INR 105,533 |
+| Customers modeled | 296 (236 repeat buyers, 1,663 transactions) |
+| Mean predicted 30-day CLV | INR 176,370 |
+| Median predicted 30-day CLV | INR 102,773 |
 | Source | `src/models/artifacts/clv_summary.json` |
 
 Mean predicted value by simulated shopper type:
 
 | Shopper type | Customers | Mean predicted CLV (INR) |
 | :--- | :--- | :--- |
-| Loyalist | 79 | 275,010 |
-| Impulse buyer | 80 | 183,232 |
-| Bargain hunter | 78 | 143,338 |
-| Comparison shopper | 44 | 75,434 |
-| Window shopper | 16 | 127,857 |
+| Loyalist | 79 | 260,862 |
+| Impulse buyer | 80 | 194,137 |
+| Bargain hunter | 78 | 138,496 |
+| Comparison shopper | 44 | 73,571 |
+| Window shopper | 15 | 135,118 |
 
 When Gamma-Gamma cannot produce a sensible estimate for a customer (for example, a single
 purchase), the model falls back to that customer's observed order value. This fallback is used for
-60 of 297 customers here (the order-value and purchase fallbacks each apply to 60), and it turned out
-to be essential on real data. The window shopper group (16 customers) has a higher mean than the
+60 of 296 customers here (the order-value and purchase fallbacks each apply to 60), and it turned out
+to be essential on real data. The window shopper group (15 customers) has a higher mean than the
 comparison shopper group, which the earlier run did not show.
 
 ### CLV holdout validation
@@ -856,47 +856,47 @@ used to check the predictions (`reports/v1_1_clv.json`, seed 42).
 
 | Quantity | Value |
 | :--- | :--- |
-| Customers with a holdout purchase | 168 of 289 |
-| Actual holdout purchases | 550 |
-| BG/NBD predicted purchases | 563.98 |
-| Naive baseline predicted purchases | 883.60 |
-| MAE of purchase count, BG/NBD | 1.634 |
-| MAE of purchase count, naive | 1.883 |
-| Spearman rank correlation, spend (BG/NBD and Gamma-Gamma) | 0.519 |
-| Spearman rank correlation, spend (naive) | 0.527 |
+| Customers with a holdout purchase | 167 of 288 |
+| Actual holdout purchases | 534 |
+| BG/NBD predicted purchases | 550.81 |
+| Naive baseline predicted purchases | 868.33 |
+| MAE of purchase count, BG/NBD | 1.605 |
+| MAE of purchase count, naive | 1.870 |
+| Spearman rank correlation, spend (BG/NBD and Gamma-Gamma) | 0.496 |
+| Spearman rank correlation, spend (naive) | 0.506 |
 
 Predicted against actual purchases, by past purchase frequency:
 
 | Past purchases | Customers | Mean predicted | Mean actual |
 | :--- | :--- | :--- | :--- |
-| 0 | 58 | 1.495 | 0.534 |
-| 1 | 46 | 1.087 | 0.478 |
-| 2 | 35 | 1.451 | 1.114 |
-| 3 to 5 | 87 | 1.947 | 1.977 |
-| 6 or more | 63 | 3.288 | 4.540 |
+| 0 | 57 | 1.509 | 0.544 |
+| 1 | 46 | 1.092 | 0.457 |
+| 2 | 42 | 1.423 | 1.310 |
+| 3 to 5 | 83 | 1.936 | 1.855 |
+| 6 or more | 60 | 3.234 | 4.550 |
 
 The Gamma-Gamma order value does not beat a simple average on this holdout. Its order-value MAE is
-16,442 against 12,365 for the observed mean and 12,335 for the shrunk estimate (`shrinkage_k` 3.0).
+16,748 against 12,416 for the observed mean and 12,455 for the shrunk estimate (`shrinkage_k` 3.0).
 The spend ranking is about as good as the naive baseline, not better.
 
-On the 289 BG/NBD-scorable customers, a regressor trained on the 400 train users (train reference
-2026-10-09, test reference 2026-10-18, 9-day horizon) reaches Spearman 0.616 with MAE 39,931. The
-BG/NBD and Gamma-Gamma combination on the same customers reaches Spearman 0.519 with MAE 43,062.
+On the 288 BG/NBD-scorable customers, a regressor trained on the 400 train users (train reference
+2026-10-09, test reference 2026-10-18, 9-day horizon) reaches Spearman 0.621 with MAE 35,928. The
+BG/NBD and Gamma-Gamma combination on the same customers reaches Spearman 0.496 with MAE 42,954.
 
 ### Segmentation
 
-KMeans was tested with 3 to 6 clusters. Silhouette was 0.397 at k=3, 0.362 at k=4, 0.347 at k=5, and
-0.281 at k=6. k=3 was selected (Davies-Bouldin 1.156). HDBSCAN on the same features found 2 clusters and
-left 16.75% of users unassigned (67 of 400), so KMeans was kept for full coverage. A GMM comparison by BIC
-has its lowest value at 8 components; it is reported but not used. Agreement with the simulated
-archetypes (adjusted Rand index) is 0.360, and bootstrap stability is 0.963
+KMeans was tested with 3 to 6 clusters. Silhouette was 0.429 at k=3, 0.378 at k=4, 0.356 at k=5, and
+0.269 at k=6. k=3 was selected (Davies-Bouldin 1.061). HDBSCAN on the same features found 2 clusters and
+left 8.0% of users unassigned (32 of 400), so KMeans was kept for full coverage. A GMM comparison by BIC
+has its lowest value at 6 components; it is reported but not used. Agreement with the simulated
+archetypes (adjusted Rand index) is 0.364, and bootstrap stability is 0.969
 (`src/models/artifacts/segmentation_summary.json`).
 
 | Segment | Users | Purchases (30 days) | Spend (30 days, INR) | Mean predicted CLV (INR) |
 | :--- | :--- | :--- | :--- | :--- |
-| Window Shoppers | 133 | 0.045 | 299 | 291,352 |
-| Single-App Regulars | 82 | 6.098 | 151,911 | 261,796 |
-| Comparison Shoppers | 185 | 3.746 | 70,256 | 122,820 |
+| Bargain Hunters | 186 | 3.661 | 68,988 | 116,450 |
+| Window Shoppers | 132 | 0.030 | 237 | 368,464 |
+| Single-App Regulars | 82 | 5.951 | 147533 | 246695 |
 
 Segment names are assigned automatically from each cluster's distinguishing features. A cluster
 whose features do not support any name is labeled `Unclassified` rather than guessed.
@@ -979,27 +979,28 @@ precision), and patience (50 or 200).
 
 | Cell | ROC-AUC | PR-AUC | Best iteration |
 | :--- | :--- | :--- | :--- |
-| ratio, binary log loss, patience 50 | 0.785 | 0.152 | 1 |
-| ratio, binary log loss, patience 200 | 0.865 | 0.313 | 399 |
-| ratio, average precision, patience 50 | 0.867 | 0.312 | 379 |
-| ratio, average precision, patience 200 | 0.867 | 0.312 | 379 |
-| one, binary log loss, patience 50 | 0.946 | 0.343 | 76 |
-| one, binary log loss, patience 200 | 0.946 | 0.343 | 76 |
-| one, average precision, patience 50 | 0.957 | 0.367 | 9 |
-| one, average precision, patience 200 | 0.957 | 0.367 | 9 |
+| ratio, binary log loss, patience 50 | 0.762 | 0.091 | 1 |
+| ratio, binary log loss, patience 200 | 0.880 | 0.315 | 400 |
+| ratio, average precision, patience 50 | 0.889 | 0.304 | 209 |
+| ratio, average precision, patience 200 | 0.882 | 0.310 | 361 |
+| one, binary log loss, patience 50 | 0.944 | 0.338 | 62 |
+| one, binary log loss, patience 200 | 0.944 | 0.338 | 62 |
+| one, average precision, patience 50 | 0.956 | 0.360 | 12 |
+| one, average precision, patience 200 | 0.956 | 0.360 | 12 |
 
 Single-feature baseline (`total_purchases_30d`): ROC-AUC 0.714. Test positive rate: 0.90%.
 
 **Conclusion (from the report):** No single factor explains best_iteration == 1; it needs all three
 together. It occurs only in the cell with the computed scale_pos_weight (about 97), binary_logloss early
-stopping and patience 50. Removing any one factor removes it: patience 200 on the same cell runs to 399
-iterations, average_precision stopping with the same weight runs to 379, and scale_pos_weight 1.0 never
+stopping and patience 50. Removing any one factor removes it: patience 200 on the same cell runs to 400
+iterations, average_precision stopping with the same weight runs to 209, and scale_pos_weight 1.0 never
 stops at 1 under either metric. The heavy positive weight inflates early predicted probabilities, so
 unweighted validation log loss first worsens while ranking is still improving, and a 50-round patience
-stops training before it recovers. The one-tree model (ROC-AUC 0.785) was an early-stopping artifact,
-not a property of the data. Without the weight the model is also better ranked (ROC-AUC 0.946 to 0.957
-against 0.865 to 0.867 with it), and every cell beats the single-feature baseline (0.714). The test split
-has only 58 buyers (0.90 percent), so differences between cells carry wide uncertainty.
+stops training before it recovers. The one-tree model (ROC-AUC 0.762) was an early-stopping artifact,
+not a property of the data. Without the weight the model is also better ranked (ROC-AUC 0.944 to 0.956
+against 0.880 to 0.889 with it), and every cell beats the single-feature baseline (0.714). The test split
+has only 58 buyers (0.90 percent), so differences between cells carry wide uncertainty. Re-run in v1.3
+on the schema v2 feature SQL; the pattern is unchanged.
 
 ### Extraction on held-out real listings (v1.2)
 
@@ -1016,8 +1017,8 @@ which the "final category" row counts. Source:
 
 | Metric | Tune (5,000 listings) | Held-out (15,000 listings) | Gap (tune minus held-out) |
 | :--- | :--- | :--- | :--- |
-| Brand accuracy | 0.630 | 0.597 | +0.033 |
-| Brand confidently wrong | 0.188 | 0.247 | -0.059 |
+| Brand accuracy | 0.629 | 0.597 | +0.032 |
+| Brand confidently wrong | 0.189 | 0.247 | -0.059 |
 | Price accuracy | 0.998 | 0.994 | +0.004 |
 | Rating accuracy | 1.000 | 1.000 | 0.000 |
 | Category accuracy among non-abstained (rows with a product-type label: tune 4,861, held-out 14,513) | 0.915 | 0.894 | +0.022 |
@@ -1032,9 +1033,9 @@ Synthetic field accuracy by OCR noise rate (2,000 screens, 4,083 listings at eac
 | Noise rate | Price accuracy | Brand accuracy | Segmentation accuracy |
 | :--- | :--- | :--- | :--- |
 | 0.00 | 1.000 | 0.970 | 1.000 |
-| 0.01 | 0.982 | 0.958 | 0.964 |
-| 0.02 | 0.968 | 0.948 | 0.935 |
-| 0.05 | 0.906 | 0.912 | 0.821 |
+| 0.01 | 1.000 | 0.965 | 1.000 |
+| 0.02 | 1.000 | 0.963 | 1.000 |
+| 0.05 | 1.000 | 0.945 | 0.9995 |
 
 Entity matching on labelled listing pairs (`reports/v1_2_entity_resolution.json`, `results.tune` and
 `results.test`; threshold 0.50, chosen on the tune families). The hard negatives are sibling variants of
@@ -1042,9 +1043,9 @@ one product (another colour, storage, or size) that the matcher must keep apart:
 
 | Method | Split | Pairs (hard negatives) | F1 | Recall | Hard-negative false-match rate |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| Matcher | test | 1,907 (598) | 0.9729 | 0.9513 | 0.0050 |
+| Matcher | test | 1,907 (598) | 0.9752 | 0.9576 | 0.0084 |
 | v1.0 exact key | test | 1,907 (598) | 0.5161 | 0.3559 | 0.0368 |
-| Matcher | tune | 2,093 (602) | 0.9728 | 0.9470 | 0.0000 |
+| Matcher | tune | 2,093 (602) | 0.9793 | 0.9631 | 0.0050 |
 | v1.0 exact key | tune | 2,093 (602) | 0.4922 | 0.3295 | 0.0166 |
 
 These pairs are synthetic. Real-listing matching was not measured in v1.2.
@@ -1056,26 +1057,26 @@ higher AUC is better:
 
 | Split | Learned ECE | Hand-weighted ECE | Learned AUC | Hand-weighted AUC |
 | :--- | :--- | :--- | :--- | :--- |
-| Tune | 0.044 | 0.408 | 0.834 | 0.809 |
-| Held-out | 0.037 | 0.406 | 0.822 | 0.811 |
+| Tune | 0.044 | 0.409 | 0.833 | 0.807 |
+| Held-out | 0.037 | 0.408 | 0.821 | 0.809 |
 
 Throughput on 5,000 synthetic events, batch size 256, on this machine (`results.throughput`):
 
 | Path | Events per second |
 | :--- | :--- |
-| `process` (one listing at a time) | 151.3 |
-| `process_batch` | 443.6 |
+| `process` (one listing at a time) | 143.9 |
+| `process_batch` | 460.0 |
 
-`process_batch` is 2.93 times faster than `process` and returns the same output.
+`process_batch` is 3.2 times faster than `process` and returns the same output.
 
 ### What held up
 
 - **The infrastructure.** The warehouse, sessionization, feature store, and leakage-safe splits
   ran on 367,624 real events with a single schema change (a wider price column).
-- **Deterministic extraction.** Prices and ratings parse at 99.9% to 100% accuracy on real listings.
+- **Deterministic extraction.** Prices and ratings parse at 99.4% to 100% accuracy on real listings.
 - **The propensity ranking.** On the disjoint v1.1 split (train 2015-08-24 and 2015-08-31, test
-  2015-09-07), the four cells without the class weight reach ROC-AUC 0.946 to 0.957, against 0.785 to 0.867
-  with it and a single-feature baseline of 0.714. Precision is much lower: PR-AUC runs from 0.152 to 0.367
+  2015-09-07), the four cells without the class weight reach ROC-AUC 0.944 to 0.956, against 0.762 to 0.889
+  with it and a single-feature baseline of 0.714. Precision is much lower: PR-AUC runs from 0.091 to 0.360
   against a 0.90% purchase rate (58 buyers in the test split), which is expected for rare events.
 - **The CLV fallback.** It fires for 78.6% of real customers. Without it, four in five real
   predictions would have been invalid.
@@ -1084,7 +1085,7 @@ Throughput on 5,000 synthetic events, batch size 256, on this machine (`results.
 
 | Problem found on real data | Fix | Result |
 | :--- | :--- | :--- |
-| Brand extraction used a fixed list of 57 brands and misattributed accessories ("Case for iPhone" read as Apple) | Open-vocabulary brand path plus a rule for compatibility phrases | Brand accuracy 1.0% to 63.1%; confidently wrong brands about 50% to 17.8% |
+| Brand extraction used a fixed list of 57 brands and misattributed accessories ("Case for iPhone" read as Apple) | Open-vocabulary brand path plus a rule for compatibility phrases | Brand accuracy 1.0% to 62.9%; confidently wrong brands about 50% to 18.9% |
 | Taxonomy forced every product into a category, so phone cases landed in Footwear | Similarity floor with an `Unknown` result | Absurd top-level categories 13.3% to 6.3% |
 | Confidence score counted filled fields, so wrong records still scored high | Confidence based on the strength of the evidence | Better separation of correct and incorrect records |
 | Missing recency was filled with zero, telling the model a never-buyer had just bought | Large sentinel for tree models, censored fill for clustering | Real-data PR-AUC 0.088 to 0.142 |
@@ -1096,6 +1097,79 @@ Throughput on 5,000 synthetic events, batch size 256, on this machine (`results.
 App switching is the project's most distinctive idea, and no public dataset has per-user activity
 across several shopping apps. The switching model and four cross-app features remain validated
 only on simulated data.
+
+---
+
+### Warehouse built from extracted screens (v1.3)
+
+In v1.3 the batch warehouse is built only from extracted screens. Each simulated event is rendered as
+noisy OCR-style screen text at a character noise rate of 0.01 (`SIMULATION_OCR_NOISE` in
+`src/config.py`), passed through the same extraction pipeline the API uses, and loaded by
+`src/features/event_loader.py`, the single write path for batch loads and serving. Product, price, and
+action columns come from the extractor, not from simulator fields. Ground truth is written to
+`data/processed/simulation_truth.parquet` beside the raw events and is never loaded into the warehouse.
+The default load ran with `--workers 4`; it took 351 seconds in total for 138,242 events
+(`reports/v1_3_load.json`): 272 seconds waiting on extraction, 59 seconds resolving products, and 19
+seconds writing the warehouse.
+
+Schema version 2 adds the tables and columns that make this possible:
+
+| Table | Role |
+| :--- | :--- |
+| `schema_info` | Records `schema_version` (2). `migrate` upgrades a version 1 warehouse in place |
+| `raw_events` | One row per captured screen: the raw text and the `extractor_version` that read it |
+| `fact_price_observations` | One row per priced listing on a screen, focal and context: 308,139 rows |
+| `product_aliases` | Every product-matching decision, so a rebuilt registry resolves screens exactly as the original did |
+
+`fact_events` holds 138,242 rows, one per `raw_events` row. `dim_products` holds 162 products. Before
+the v1.3 matcher fixes the same events resolved to 1,026 products for 17 true products.
+
+Extraction accuracy at the default noise of 0.01, over all 138,242 events (measured on the rebuilt
+default warehouse; the noise propagation report does not include this level). An event is correct for
+product identity when its `canonical_product_id` equals the one most events of the same true product
+received:
+
+| Field | Accuracy | Required |
+| :--- | :--- | :--- |
+| Action | 0.9986 | at least 0.97 |
+| Price (within 1%) | 1.0000 | at least 0.95 |
+| Product identity | 0.9536 | at least 0.95 |
+
+Before the OCR-tolerant price parsing and product matching work, identity was 0.9027 and price was
+0.9877.
+
+Propagation of extraction errors into the propensity model
+(`reports/v1_3_noise_propagation.json`, `results.levels`; seed 42, 400 users, 30 days). The
+baseline is the noise-free run. ROC-AUC is on the propensity test set with a 95% bootstrap interval;
+delta is the paired difference against the baseline on shared users:
+
+| OCR noise | Action | Price | Product identity | Product id collisions | Propensity ROC-AUC (95% CI) | Delta vs baseline (95% CI) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 0.00 | 1.0000 | 1.0000 | 1.0000 | 0 | 0.882 (0.846 to 0.914) | baseline |
+| 0.02 | 0.9973 | 1.0000 | 0.9035 | 17 | 0.873 (0.836 to 0.906) | -0.006 (-0.018 to 0.006) |
+| 0.05 | 0.9937 | 0.9999 | 0.7359 | 17 | 0.874 (0.835 to 0.909) | -0.007 (-0.021 to 0.007) |
+
+The noise-free row (0.882) differs from the 0.872 in `src/models/artifacts/propensity_metrics.json` as
+expected: the experiment's noise-free level uses OCR noise 0.0, while the default warehouse uses
+`SIMULATION_OCR_NOISE` = 0.01. In
+this run, the drop in product identity accuracy cost little ROC-AUC at these noise levels.
+
+New price features (`src/features/behavioral_features.py`):
+
+- **Discount features** (`avg_discount_pct_on_purchases`, `pct_purchases_with_discount`) read the
+  `discount_pct` stored on each purchase. A purchase with no stored discount counts as no discount.
+- **`informed_purchase_count`** counts purchases that had a comparable price on another app inside the
+  `CROSS_APP_PRICE_LOOKBACK_HOURS` window (24 hours).
+- **`chose_cheaper_app_rate`** is the share of informed purchases made on the cheaper app. It is null
+  when no purchase is informed, and the model input is the sentinel -1.0, never 0.
+- **`avg_abs_price_gap_pct`** is the average absolute price gap between apps across the user's
+  comparisons. It is null, with the same -1.0 sentinel, when there are none.
+- The feature SQL no longer reads `dim_products.avg_price`. Feature inputs are cut at the reference date.
+
+The feature store now has 33 candidate features (see the Feature store table above).
+
+Cross-app comparisons: 0.503 of comparisons have the primary app sort after the compared app. The
+release tripwire G1.3-05 accepts a share from 0.35 to 0.65; the v1.0 value was 0.0.
 
 ---
 
@@ -1162,7 +1236,7 @@ only on simulated data.
 make test             # or: .venv/bin/pytest -v
 ```
 
-The suite has **592 tests across 49 modules** and runs in about four minutes (212 seconds in the v1.2 run). Serving tests run
+The suite has **786 tests across 56 modules** and runs in under four minutes (232 seconds in the v1.3 release run). Serving tests run
 against a small simulated warehouse built in a temporary directory, never against the real
 warehouses. Beyond unit tests for each module, several tests guard properties that once broke,
 or could break, without any error:
