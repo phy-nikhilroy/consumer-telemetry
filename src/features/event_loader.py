@@ -26,6 +26,7 @@ import multiprocessing
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -528,6 +529,7 @@ def load_raw_events(
     raw_events: pl.DataFrame,
     workers: int = 1,
     registry: Optional[Any] = None,
+    timings: Optional[Dict[str, float]] = None,
 ) -> Dict[str, int]:
     """
     Extracts and loads raw screen events; returns rows written per table.
@@ -538,7 +540,14 @@ def load_raw_events(
     extraction runs in a process pool; resolution and writes stay in this process, in
     input order, so the tables are identical for any `workers`. `dim_users` is refreshed
     for every user in the warehouse at the end.
+
+    When `timings` is given it is filled with wall-clock seconds: `extract_wait_seconds`
+    (waiting for extracted screens), `resolve_seconds` (product resolution),
+    `write_seconds` (warehouse writes including the `dim_users` refresh), and
+    `total_seconds`.
     """
+    started = time.perf_counter()
+    clock = {"extract_wait_seconds": 0.0, "resolve_seconds": 0.0, "write_seconds": 0.0}
     missing = [c for c in REQUIRED_COLUMNS if c not in raw_events.columns]
     if missing:
         raise ValueError(f"raw_events is missing columns {missing}")
@@ -583,7 +592,9 @@ def load_raw_events(
     pending: List[Dict[str, Any]] = []
 
     def flush() -> None:
+        t0 = time.perf_counter()
         counts = write_events(con, pending)
+        clock["write_seconds"] += time.perf_counter() - t0
         for key in totals:
             totals[key] += counts[key]
         pending.clear()
@@ -592,12 +603,16 @@ def load_raw_events(
         for row in range(frame.height):
             products = memo_hits[row]
             if products is None:
+                t0 = time.perf_counter()
                 products = next(fresh)
+                clock["extract_wait_seconds"] += time.perf_counter() - t0
                 _memo_put(texts[row], apps[row], products)
+            t0 = time.perf_counter()
+            resolved = resolve_products(products, registry)
+            clock["resolve_seconds"] += time.perf_counter() - t0
             pending.append({
                 "event_id": ids[row], "user_id": users[row], "timestamp": stamps[row],
-                "app_name": apps[row], "raw_text": texts[row],
-                "products": resolve_products(products, registry),
+                "app_name": apps[row], "raw_text": texts[row], "products": resolved,
             })
             if len(pending) >= EVENT_LOADER_CHUNK_SIZE:
                 flush()
@@ -609,9 +624,14 @@ def load_raw_events(
             executor.shutdown(cancel_futures=True)
         raise
 
+    t0 = time.perf_counter()
     refresh_dim_users(con)
+    clock["write_seconds"] += time.perf_counter() - t0
     totals["dim_products"] = con.execute("SELECT COUNT(*) FROM dim_products").fetchone()[0]
     totals["dim_users"] = con.execute("SELECT COUNT(*) FROM dim_users").fetchone()[0]
+    if timings is not None:
+        timings.update({k: round(v, 2) for k, v in clock.items()})
+        timings["total_seconds"] = round(time.perf_counter() - started, 2)
     return totals
 
 

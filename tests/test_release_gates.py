@@ -61,3 +61,20 @@ def test_write_report_envelope(tmp_path, monkeypatch):
     assert reporting.write_report("t2", "1.1", {}, seed=7).exists()
     with pytest.raises(ValueError):
         reporting.write_report("../x", "1.1", {})
+
+
+def test_v1_3_gates_are_registered_with_their_types():
+    """G1.3-01 to G1.3-12 are registered once each; 05, 06 and 11 are tripwires."""
+    ids = [fn.gate_id for fn in gates.GATES["1.3"]]
+    assert ids == [f"G1.3-{i:02d}" for i in range(1, 13)]
+    kinds = {fn.gate_id: fn.kind for fn in gates.GATES["1.3"]}
+    assert {g for g, k in kinds.items() if k == "T"} == {"G1.3-05", "G1.3-06", "G1.3-11"}
+
+
+def test_suite_seconds_reads_the_pytest_summary():
+    assert gates._suite_seconds("779 passed, 15 warnings in 224.38s (0:03:44)") == 224.38
+    assert gates._suite_seconds("no output") == float("inf")
+
+
+def test_feature_sql_gate_passes_on_this_checkout():
+    assert gates.feature_sql_has_no_avg_price().passed

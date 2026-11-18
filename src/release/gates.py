@@ -434,6 +434,153 @@ def suite_passes_with_350_tests() -> Tuple[bool, str]:
     return count >= 350 and code == 0, f"{count} tests collected; {summary}"
 
 
+# ---------------------------------------------------------------------------------------
+# v1.3: an extraction-driven warehouse
+# ---------------------------------------------------------------------------------------
+
+def _warehouse() -> Any:
+    """A read-only connection to the batch warehouse."""
+    import duckdb
+
+    from src.config import DEFAULT_DB_PATH
+
+    return duckdb.connect(str(DEFAULT_DB_PATH), read_only=True)
+
+
+def _scalar(sql: str) -> Any:
+    """The first value of a read-only warehouse query."""
+    con = _warehouse()
+    try:
+        return con.execute(sql).fetchone()[0]
+    finally:
+        con.close()
+
+
+@gate("1.3", "G1.3-01", "H")
+def warehouse_is_schema_version_2() -> Tuple[bool, str]:
+    """schema_info records schema version 2 in the batch warehouse."""
+    version = _scalar("SELECT value FROM schema_info WHERE key = 'schema_version'")
+    return version == "2", f"schema_version {version!r}"
+
+
+@gate("1.3", "G1.3-02", "H")
+def raw_and_fact_event_ids_match() -> Tuple[bool, str]:
+    """raw_events and fact_events hold the same set of event ids."""
+    only_raw = _scalar("SELECT COUNT(*) FROM raw_events r ANTI JOIN fact_events f USING (event_id)")
+    only_fact = _scalar("SELECT COUNT(*) FROM fact_events f ANTI JOIN raw_events r USING (event_id)")
+    return only_raw == 0 and only_fact == 0, f"{only_raw} only in raw_events, {only_fact} only in fact_events"
+
+
+@gate("1.3", "G1.3-03", "H")
+def data_checks_pass() -> Tuple[bool, str]:
+    """src/features/data_checks.py exits 0 on the batch warehouse."""
+    run = subprocess.run([str(_ROOT / ".venv" / "bin" / "python"), "src/features/data_checks.py"],
+                         cwd=_ROOT, capture_output=True, text=True)
+    failing = [line for line in run.stdout.splitlines() if line.startswith("FAIL")]
+    return run.returncode == 0, f"exit {run.returncode}; {len(failing)} failing" + (f": {failing[0]}" if failing else "")
+
+
+@gate("1.3", "G1.3-04", "H")
+def no_ground_truth_columns_in_warehouse() -> Tuple[bool, str]:
+    """No warehouse column is named archetype or starts with true_."""
+    con = _warehouse()
+    try:
+        bad = con.execute(
+            "SELECT table_name || '.' || column_name FROM information_schema.columns "
+            "WHERE column_name = 'archetype' OR column_name LIKE 'true\\_%' ESCAPE '\\'"
+        ).fetchall()
+    finally:
+        con.close()
+    return not bad, "none" if not bad else ", ".join(r[0] for r in bad)
+
+
+@gate("1.3", "G1.3-05", "T")
+def comparison_direction_is_balanced() -> Tuple[bool, str]:
+    """The share of comparisons whose primary app sorts after the compared app is in [0.35, 0.65]."""
+    share = _scalar(
+        "SELECT AVG(CASE WHEN primary_app > compared_app THEN 1.0 ELSE 0.0 END) FROM fact_cross_app_comparisons"
+    )
+    share = float(share) if share is not None else float("nan")
+    return 0.35 <= share <= 0.65, f"share {share:.4f} (in [0.35, 0.65])"
+
+
+@gate("1.3", "G1.3-06", "T")
+def extraction_accuracy_at_default_noise() -> Tuple[bool, str]:
+    """Against the simulator truth: action >= 0.97, price >= 0.95, product identity >= 0.95."""
+    from src.config import DEFAULT_DB_PATH, SIMULATION_TRUTH_PATH
+    from src.experiments.noise_propagation import event_accuracy
+
+    acc = event_accuracy(DEFAULT_DB_PATH, SIMULATION_TRUTH_PATH)
+    ok = acc["action"] >= 0.97 and acc["price"] >= 0.95 and acc["identity"] >= 0.95
+    return ok, f"action {acc['action']:.4f}, price {acc['price']:.4f}, identity {acc['identity']:.4f} over {acc['events']} events"
+
+
+@gate("1.3", "G1.3-07", "H")
+def noise_propagation_report_complete() -> Tuple[bool, str]:
+    """reports/v1_3_noise_propagation.json has three noise levels with accuracies, ROC-AUC, CI and delta."""
+    levels = _report("v1_3_noise_propagation")["levels"]
+    missing = []
+    for key, level in levels.items():
+        for path in ("accuracy.action", "accuracy.price", "accuracy.identity", "propensity_test.roc_auc",
+                     "propensity_test.ci", "delta_vs_baseline.delta"):
+            try:
+                _get(level, path)
+            except KeyError:
+                missing.append(f"{key}:{path}")
+    return len(levels) == 3 and not missing, f"{len(levels)} levels {sorted(levels)}" + (f"; missing {missing[:3]}" if missing else "")
+
+
+@gate("1.3", "G1.3-08", "H")
+def feature_sql_has_no_avg_price() -> Tuple[bool, str]:
+    """No feature module (src/features/*_features.py) mentions avg_price."""
+    hits = [f"{path.name}:{n}" for path in sorted((_ROOT / "src" / "features").glob("*_features.py"))
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1) if "avg_price" in line]
+    return not hits, "no references" if not hits else ", ".join(hits)
+
+
+@gate("1.3", "G1.3-09", "H")
+def leakage_tests_pass() -> Tuple[bool, str]:
+    """tests/test_leakage.py passes, covering events, price observations and comparisons."""
+    return _run_pytest("tests/test_leakage.py")
+
+
+@gate("1.3", "G1.3-10", "H")
+def serving_parity_tests_pass() -> Tuple[bool, str]:
+    """The serving parity tests pass (tests/test_scoring.py and tests/test_warehouse.py)."""
+    return _run_pytest("tests/test_scoring.py", "tests/test_warehouse.py")
+
+
+@gate("1.3", "G1.3-11", "T")
+def default_load_under_fifteen_minutes() -> Tuple[bool, str]:
+    """reports/v1_3_load.json: loading the default warehouse with 4 workers took under 15 minutes."""
+    load = _report("v1_3_load")
+    total = float(load["total_seconds"])
+    return int(load["workers"]) == 4 and total < 900.0, (
+        f"{total:.0f} s with {load['workers']} workers (extract wait {load['extract_wait_seconds']:.0f} s, "
+        f"resolve {load['resolve_seconds']:.0f} s, write {load['write_seconds']:.0f} s; < 900 s)"
+    )
+
+
+def _suite_seconds(summary: str) -> float:
+    """Wall-clock seconds from a pytest summary line, or infinity when absent."""
+    match = re.search(r" in ([0-9.]+)s", summary)
+    return float(match.group(1)) if match else float("inf")
+
+
+@gate("1.3", "G1.3-12", "H")
+def suite_fast_and_every_other_gate_passes() -> Tuple[bool, str]:
+    """At least 400 tests, the suite passes in under 5 minutes, and every other gate of every version passes."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False, "not run inside pytest (it would run the suite recursively)"
+    count, code, summary = _suite_result()
+    seconds = _suite_seconds(summary)
+    others = [fn() for version in GATES for fn in GATES[version]
+              if getattr(fn, "gate_id", "") != "G1.3-12"]
+    failed = [r.gate_id for r in others if not r.passed]
+    ok = count >= 400 and code == 0 and seconds < 300.0 and not failed
+    return ok, f"{count} tests, {seconds:.0f} s (< 300); {summary}; other gates failing: {failed or 'none'}"
+
+
 def run_gates(version: str) -> List[GateResult]:
     """Run every gate of a version (or all versions) and return results; never raises per gate."""
     if version == "all":
