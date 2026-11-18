@@ -60,6 +60,9 @@ from src.features.database import DatabaseManager
 
 CLV_DISTRIBUTION_PLOT_PATH = ARTIFACTS_DIR / "clv_distribution.png"
 CLV_SUMMARY_PATH = ARTIFACTS_DIR / "clv_summary.json"
+# Simulator ground truth (archetype per user). A warehouse simulated before the raw event
+# loader kept the archetype in simulated_events.parquet, which is read when no truth file
+# exists yet.
 SIMULATED_EVENTS_PATH = PROCESSED_DATA_DIR / "simulated_events.parquet"
 
 DEFAULT_HORIZON_DAYS = 30
@@ -312,8 +315,15 @@ def load_user_archetypes(
     The archetype is ground truth from the simulator and is not part of the warehouse,
     so it is used only to sanity check the model, never as a feature.
     """
-    path = Path(events_path) if events_path else SIMULATED_EVENTS_PATH
-    if not path.exists():
+    from src.config import SIMULATION_TRUTH_PATH
+
+    if events_path:
+        path = Path(events_path)
+    elif SIMULATION_TRUTH_PATH.exists():
+        path = SIMULATION_TRUTH_PATH
+    else:
+        path = SIMULATED_EVENTS_PATH
+    if not path.exists() or "archetype" not in pl.read_parquet_schema(path):
         return None
 
     return (

@@ -7,8 +7,12 @@ Those traits drive both the historical events that features are computed from an
 forward events that targets are computed from, so the engineered feature store carries
 genuine predictive signal rather than per-archetype noise.
 
-Routes simulated events through the Week 1 extraction pipeline and populates the DuckDB
-warehouse.
+Every event is emitted as raw screen text: the focal listing plus 0 to
+`SIMULATION_MAX_CONTEXT_LISTINGS` listings of the same category, rendered with
+`screen_generator` and OCR noise at `--ocr-noise`. The warehouse is filled only by the raw
+event loader (`src/features/event_loader.py`), so the models see real extraction output.
+What the simulator intended (archetype, product, action, price, currency, app) is written
+to a separate truth file read only by evaluation code, never to the warehouse.
 """
 
 from __future__ import annotations
@@ -19,20 +23,36 @@ from functools import lru_cache
 from pathlib import Path
 import random
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Ensure consumer-telemetry root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import duckdb
 import polars as pl
 
 from src.features.database import DatabaseManager, DEFAULT_DB_PATH
-from src.ingestion.pipeline import process
-from src.config import PRICE_TIERS, RANDOM_SEED, USD_TO_INR_RATE
-from src.ingestion.synthetic_data import CATALOG, _format_inr, generate_app_screen_text
+from src.config import (
+    PRICE_TIERS,
+    RANDOM_SEED,
+    SIMULATION_LOAD_WORKERS,
+    SIMULATION_MAX_CONTEXT_LISTINGS,
+    SIMULATION_OCR_NOISE,
+    SIMULATION_TRUTH_PATH,
+)
+from src.ingestion.screen_generator import apply_ocr_noise, render_listing, render_screen
+from src.ingestion.synthetic_data import CATALOG, generate_app_screen_text
+
+# Columns of the raw event frame the loader reads, and of the truth frame evaluation reads.
+RAW_EVENT_COLUMNS = ("event_id", "user_id", "timestamp", "app_name", "raw_text")
+TRUTH_COLUMNS = (
+    "event_id", "user_id", "archetype", "true_sku_key", "true_action",
+    "true_price", "true_currency", "true_app",
+)
+# The screen renderer draws from its own generator, seeded from the simulation seed, so
+# rendering never shifts the behavioural draws on the module generator.
+SCREEN_SEED_OFFSET = 1_000_003
 
 # 5 User Behavioral Archetypes
 ARCHETYPES = [
@@ -277,51 +297,74 @@ def create_user_profiles(num_users: int = 400, seed: int = 42) -> List[UserProfi
     return profiles
 
 
-def _generate_noisy_text(catalog_item: dict, app: str, action: str, discount_pct: int, rating: float) -> str:
+def _consume_v1_text_draws(catalog_item: dict, app: str, action: str, discount_pct: int, rating: float) -> None:
     """
-    Creates realistic noisy raw OCR text resembling app dumps.
+    Makes the module-generator draws the v1.0 single-line screen text made.
 
-    Delegates to `synthetic_data.generate_app_screen_text` on the module-level random
-    generator, so the seeded simulation is unchanged; the live stream generator shares
-    the same function.
+    The text itself is no longer used. Keeping the draws keeps the behavioural stream (users,
+    timestamps, apps, products, actions, prices, and event ids) identical to the v1.2
+    simulator for the same seed, so a change in any model number reflects extraction, not a
+    different population. The v1.4 behaviour engine replaces this module.
     """
-    return generate_app_screen_text(catalog_item, app, action, discount_pct, rating)
+    generate_app_screen_text(catalog_item, app, action, discount_pct, rating)
 
 
-_catalog_extraction_cache: Dict[str, dict] = {}
+def sku_key(item: dict) -> str:
+    """The ground-truth identity of a catalog item: brand, title, and specs."""
+    return " ".join([item["brand"], item["title"], *item.get("specs", [])]).strip()
 
 
-def _get_catalog_extraction(item: dict) -> dict:
-    """Extracts canonical product attributes via Week 1 pipeline once per unique catalog item."""
-    key = f"{item['brand']} {item['title']} {' '.join(item.get('specs', []))}".strip()
-    if key not in _catalog_extraction_cache:
-        sample_text = f"{key} $99.99 4.5★ Add to Cart"
-        prod = process(sample_text)
-        _catalog_extraction_cache[key] = {
-            "canonical_name": prod.canonical_name,
-            "canonical_product_id": prod.canonical_product_id,
-            "brand": prod.brand,
-            "product_title": prod.product_title,
-            "category_l1": prod.category_l1,
-            "category_l2": prod.category_l2,
-        }
-    return _catalog_extraction_cache[key]
+def _context_items(item: dict, rng: random.Random) -> List[dict]:
+    """0 to SIMULATION_MAX_CONTEXT_LISTINGS other catalog items of the focal item's category."""
+    pool = [c for c in CATALOG if c is not item and c.get("category") == item.get("category")]
+    count = min(len(pool), rng.randint(0, SIMULATION_MAX_CONTEXT_LISTINGS))
+    return rng.sample(pool, count)
+
+
+def render_event_screen(
+    item: dict,
+    app: str,
+    action: str,
+    discount_pct: int,
+    rating: float,
+    price: float,
+    rng: random.Random,
+    ocr_noise: float = SIMULATION_OCR_NOISE,
+) -> str:
+    """
+    Renders one event's screen: the focal listing first, at the simulated `price`, then
+    context listings of the same category with their own prices and a view action, then OCR
+    noise at `ocr_noise`. Context listings never carry buy or cart, so the extractor's focal
+    rule (first buy or cart listing, otherwise the first listing) picks the focal one.
+    """
+    listings = [render_listing(item, app, action, discount_pct, rating, rng, price=price, title_variant=False)]
+    for other in _context_items(item, rng):
+        listings.append(render_listing(
+            other, app, "view", rng.choice([0, 10, 20]), round(rng.uniform(3.5, 4.9), 1), rng,
+            title_variant=False,
+        ))
+    return apply_ocr_noise(render_screen(listings, rng), ocr_noise, rng)
 
 
 def simulate_events_dataset(
     num_users: int = 400,
     days: int = 30,
     seed: int = 42,
-    start_date: Optional[datetime] = None
+    start_date: Optional[datetime] = None,
+    ocr_noise: float = SIMULATION_OCR_NOISE,
 ) -> Tuple[List[Dict[str, Any]], List[UserProfile]]:
     """
     Generates a realistic multi-day simulated telemetry dataset.
+
+    Each event dict carries the raw event (`RAW_EVENT_COLUMNS`) and its ground truth
+    (`TRUTH_COLUMNS`). `split_events` separates the two.
 
     Daily event volume, app choice, and conversion are all driven by the latent traits
     held on each UserProfile, with a weekend activity uplift and an optional dormancy
     onset per user.
     """
     random.seed(seed)
+    screen_rng = random.Random(seed + SCREEN_SEED_OFFSET)
     profiles = create_user_profiles(num_users=num_users, seed=seed)
     if start_date is None:
         start_date = datetime(2026, 9, 28, 8, 0, 0, tzinfo=timezone.utc)
@@ -373,25 +416,25 @@ def simulate_events_dataset(
                 base_price = item["base_inr"] if currency == "INR" else item["base_usd"]
                 final_price = round(base_price * (1.0 - discount_pct / 100.0), 2)
 
-                raw_text = _generate_noisy_text(item, app, action, discount_pct, rating)
-                extracted = _get_catalog_extraction(item)
+                if currency == "INR":
+                    # INR screens show whole rupees, so the true price is the shown one.
+                    final_price = float(round(final_price))
+                _consume_v1_text_draws(item, app, action, discount_pct, rating)
 
                 event_record = {
                     "event_id": f"evt_{event_counter:07d}",
                     "user_id": profile.user_id,
-                    "archetype": profile.archetype,
                     "timestamp": ts.isoformat(),
                     "app_name": app,
-                    "canonical_product_id": extracted["canonical_product_id"],
-                    "canonical_name": extracted["canonical_name"],
-                    "brand": extracted["brand"],
-                    "product_title": extracted["product_title"],
-                    "category_l1": extracted["category_l1"],
-                    "category_l2": extracted["category_l2"],
-                    "action": action,
-                    "price": final_price,
-                    "currency": currency,
-                    "session_id": None,
+                    "raw_text": render_event_screen(
+                        item, app, action, discount_pct, rating, final_price, screen_rng, ocr_noise
+                    ),
+                    "archetype": profile.archetype,
+                    "true_sku_key": sku_key(item),
+                    "true_action": action,
+                    "true_price": final_price,
+                    "true_currency": currency,
+                    "true_app": app,
                 }
                 all_events.append(event_record)
                 event_counter += 1
@@ -406,24 +449,24 @@ def simulate_events_dataset(
                     comp_curr = "INR" if comp_app in ["amazon_in", "flipkart"] else "USD"
                     comp_base = item["base_inr"] if comp_curr == "INR" else item["base_usd"]
                     comp_price = round(comp_base * (1.0 - discount_pct / 100.0), 2)
-                    comp_text = _generate_noisy_text(item, comp_app, "view", discount_pct, rating)
+                    if comp_curr == "INR":
+                        comp_price = float(round(comp_price))
+                    _consume_v1_text_draws(item, comp_app, "view", discount_pct, rating)
 
                     comp_record = {
                         "event_id": f"evt_{event_counter:07d}",
                         "user_id": profile.user_id,
-                        "archetype": profile.archetype,
                         "timestamp": comp_ts.isoformat(),
                         "app_name": comp_app,
-                        "canonical_product_id": extracted["canonical_product_id"],
-                        "canonical_name": extracted["canonical_name"],
-                        "brand": extracted["brand"],
-                        "product_title": extracted["product_title"],
-                        "category_l1": extracted["category_l1"],
-                        "category_l2": extracted["category_l2"],
-                        "action": "view",
-                        "price": comp_price,
-                        "currency": comp_curr,
-                        "session_id": None,
+                        "raw_text": render_event_screen(
+                            item, comp_app, "view", discount_pct, rating, comp_price, screen_rng, ocr_noise
+                        ),
+                        "archetype": profile.archetype,
+                        "true_sku_key": sku_key(item),
+                        "true_action": "view",
+                        "true_price": comp_price,
+                        "true_currency": comp_curr,
+                        "true_app": comp_app,
                     }
                     all_events.append(comp_record)
                     event_counter += 1
@@ -433,113 +476,61 @@ def simulate_events_dataset(
     return all_events, profiles
 
 
+def split_events(events: List[Dict[str, Any]]) -> Tuple[pl.DataFrame, pl.DataFrame]:
+    """Splits simulated events into the raw event frame and the ground-truth frame."""
+    frame = pl.DataFrame(events) if events else pl.DataFrame(
+        schema={c: pl.Utf8 for c in RAW_EVENT_COLUMNS + TRUTH_COLUMNS[2:]}
+    )
+    raw = frame.select(RAW_EVENT_COLUMNS).with_columns(
+        pl.col("timestamp").str.to_datetime(time_zone="UTC").dt.replace_time_zone(None)
+        if frame.schema["timestamp"] == pl.Utf8 else pl.col("timestamp")
+    )
+    return raw, frame.select(TRUTH_COLUMNS)
+
+
 def reload_duckdb_warehouse(
     events: List[Dict[str, Any]],
     profiles: List[UserProfile],
-    db_path: Optional[str] = None
+    db_path: Optional[str] = None,
+    workers: int = SIMULATION_LOAD_WORKERS,
 ) -> Dict[str, int]:
     """
-    Populates DuckDB warehouse tables (fact_events, dim_products, dim_users)
-    with the expanded simulated dataset.
+    Rebuilds the warehouse at `db_path` from the simulated raw events.
+
+    Every warehouse table is emptied, then the raw screens go through `load_raw_events`,
+    which extracts them and fills `raw_events`, `fact_events`, `fact_price_observations`,
+    `dim_products`, and `dim_users`. No ground-truth column reaches the warehouse.
     """
+    from src.features.event_loader import load_raw_events
+
     db_mgr = DatabaseManager(db_path=db_path or DEFAULT_DB_PATH)
     db_mgr.init_schema()
-
-    df = pl.DataFrame(events)
+    raw, _ = split_events(events)
 
     con = db_mgr.get_connection()
     try:
-        con.register("expanded_events_view", df.to_arrow())
-
-        # Clean existing tables and reload
-        con.execute("DELETE FROM fact_events")
-        con.execute("DELETE FROM dim_products")
-        con.execute("DELETE FROM dim_users")
-
-        # 1. Insert fact_events
-        con.execute("""
-            INSERT INTO fact_events (
-                event_id,
-                user_id,
-                timestamp,
-                app_name,
-                canonical_product_id,
-                action,
-                price,
-                currency,
-                session_id
-            )
-            SELECT
-                event_id,
-                user_id,
-                CAST(timestamp AS TIMESTAMP) AS timestamp,
-                app_name,
-                canonical_product_id,
-                action,
-                CAST(price AS DECIMAL(10,2)) AS price,
-                currency,
-                session_id
-            FROM expanded_events_view
-        """)
-
-        # 2. Insert dim_products
-        con.execute(f"""
-            INSERT INTO dim_products (
-                canonical_product_id,
-                brand,
-                product_title,
-                category_l1,
-                category_l2,
-                avg_price
-            )
-            SELECT
-                canonical_product_id,
-                FIRST(brand) FILTER (WHERE brand IS NOT NULL) AS brand,
-                FIRST(canonical_name) FILTER (WHERE canonical_name IS NOT NULL) AS product_title,
-                FIRST(category_l1) FILTER (WHERE category_l1 IS NOT NULL) AS category_l1,
-                FIRST(category_l2) FILTER (WHERE category_l2 IS NOT NULL) AS category_l2,
-                -- Normalize currency before averaging. Averaging raw prices across a
-                -- mix of INR and USD listings understates the true average by a factor
-                -- of roughly two, and because the behavioral feature layer compares a
-                -- currency-normalized price against this column, an unnormalized value
-                -- made almost every purchase look like it was above average price,
-                -- silently zeroing out the discount features for 96 percent of users.
-                CAST(AVG(
-                    CASE WHEN currency = 'USD' THEN price * {USD_TO_INR_RATE} ELSE price END
-                ) AS DECIMAL(12,2)) AS avg_price
-            FROM expanded_events_view
-            WHERE canonical_product_id IS NOT NULL
-            GROUP BY canonical_product_id
-        """)
-
-        # 3. Insert dim_users
-        con.execute("""
-            INSERT INTO dim_users (
-                user_id,
-                first_seen,
-                primary_app,
-                total_events
-            )
-            SELECT
-                user_id,
-                MIN(CAST(timestamp AS TIMESTAMP)) AS first_seen,
-                MODE(app_name) AS primary_app,
-                COUNT(event_id) AS total_events
-            FROM expanded_events_view
-            GROUP BY user_id
-        """)
-
-        fact_count = con.execute("SELECT COUNT(*) FROM fact_events").fetchone()[0]
-        prod_count = con.execute("SELECT COUNT(*) FROM dim_products").fetchone()[0]
-        user_count = con.execute("SELECT COUNT(*) FROM dim_users").fetchone()[0]
-
+        for table in ("fact_cross_app_comparisons", "fact_price_observations", "fact_events",
+                      "raw_events", "product_aliases", "dim_products", "dim_users"):
+            con.execute(f"DELETE FROM {table}")
+        load_raw_events(con, raw, workers=workers)
         return {
-            "fact_events": fact_count,
-            "dim_products": prod_count,
-            "dim_users": user_count,
+            table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("raw_events", "fact_events", "fact_price_observations", "dim_products", "dim_users")
         }
     finally:
         con.close()
+
+
+def default_truth_path(output_parquet: Union[str, Path]) -> Path:
+    """
+    Where the truth file goes for a given raw event parquet: `SIMULATION_TRUTH_PATH`'s name
+    beside the default `simulated_events.parquet`, and `<stem>_truth.parquet` beside any
+    other, so an isolated run never overwrites the default truth file.
+    """
+    out = Path(output_parquet)
+    if out.name == "simulated_events.parquet":
+        return out.with_name(SIMULATION_TRUTH_PATH.name)
+    return out.with_name(f"{out.stem}_truth.parquet")
 
 
 def run_simulation(
@@ -548,21 +539,28 @@ def run_simulation(
     db_path: Optional[str] = None,
     output_parquet: str = "data/processed/simulated_events.parquet",
     seed: int = RANDOM_SEED,
+    ocr_noise: float = SIMULATION_OCR_NOISE,
+    workers: int = SIMULATION_LOAD_WORKERS,
+    truth_parquet: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Generates the dataset for `seed` and reloads the DuckDB warehouse at `db_path`."""
-    print(f"Simulating {num_users} users over {days} days...")
-    events, profiles = simulate_events_dataset(num_users=num_users, days=days, seed=seed)
+    """
+    Simulates `seed`, writes the raw events to `output_parquet` and the ground truth to
+    `truth_parquet` (default `default_truth_path(output_parquet)`), and rebuilds the
+    warehouse at `db_path` through the raw event loader with `workers` extraction processes.
+    """
+    print(f"Simulating {num_users} users over {days} days (OCR noise {ocr_noise})...")
+    events, profiles = simulate_events_dataset(num_users=num_users, days=days, seed=seed, ocr_noise=ocr_noise)
     print(f"Generated {len(events)} events across 5 archetypes.")
 
-    # Save to parquet
+    raw, truth = split_events(events)
     out_path = Path(output_parquet)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    df = pl.DataFrame(events)
-    df.write_parquet(out_path)
-    print(f"Saved simulated events to {out_path} ({df.shape[0]} rows).")
+    raw.write_parquet(out_path)
+    truth_path = Path(truth_parquet) if truth_parquet else default_truth_path(out_path)
+    truth.write_parquet(truth_path)
+    print(f"Saved raw events to {out_path} and ground truth to {truth_path} ({raw.height} rows).")
 
-    # Reload DuckDB
-    counts = reload_duckdb_warehouse(events, profiles, db_path=db_path)
+    counts = reload_duckdb_warehouse(events, profiles, db_path=db_path, workers=workers)
     print("Warehouse reloaded:")
     for table, count in counts.items():
         print(f"  {table}: {count} records")
@@ -570,6 +568,7 @@ def run_simulation(
     return {
         "total_events": len(events),
         "parquet_path": str(out_path),
+        "truth_path": str(truth_path),
         "warehouse_counts": counts,
     }
 
@@ -581,8 +580,15 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=RANDOM_SEED, help="Simulation seed (default: RANDOM_SEED)")
     parser.add_argument("--db-path", type=str, default=None, help="Warehouse to rebuild (default: batch warehouse)")
     parser.add_argument("--output-parquet", type=str, default="data/processed/simulated_events.parquet",
-                        help="Where to write the simulated events")
+                        help="Where to write the simulated raw events")
+    parser.add_argument("--truth-parquet", type=str, default=None,
+                        help="Where to write the ground truth (default: beside --output-parquet)")
+    parser.add_argument("--ocr-noise", type=float, default=SIMULATION_OCR_NOISE,
+                        help=f"OCR character noise rate of the rendered screens (default: {SIMULATION_OCR_NOISE})")
+    parser.add_argument("--workers", type=int, default=SIMULATION_LOAD_WORKERS,
+                        help=f"Extraction processes for the load (default: {SIMULATION_LOAD_WORKERS})")
     args = parser.parse_args()
 
     run_simulation(num_users=args.users, days=args.days, db_path=args.db_path,
-                   output_parquet=args.output_parquet, seed=args.seed)
+                   output_parquet=args.output_parquet, seed=args.seed, ocr_noise=args.ocr_noise,
+                   workers=args.workers, truth_parquet=args.truth_parquet)

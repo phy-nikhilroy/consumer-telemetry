@@ -199,3 +199,18 @@ CONFIDENCE_ECE_BINS = 10
 # re-extraction can tell which extractor produced the stored fields.
 SCHEMA_VERSION = "2"
 EXTRACTOR_VERSION = "2.0.0"
+
+
+# Raw event loader (src/features/event_loader.py). Extraction runs in tasks of
+# EVENT_LOADER_TASK_SIZE screens (one process_batch call each); writes are flushed every
+# EVENT_LOADER_CHUNK_SIZE events. SIMULATION_OCR_NOISE is the character noise rate the
+# simulator applies to its rendered screens.
+EVENT_LOADER_TASK_SIZE = 256
+EVENT_LOADER_CHUNK_SIZE = 5_000
+# Extracted screens the loader remembers within one process (see event_loader._SCREEN_MEMO).
+EVENT_LOADER_MEMO_SIZE = 20_000
+SIMULATION_OCR_NOISE = 0.01
+SIMULATION_TRUTH_PATH = PROCESSED_DATA_DIR / "simulation_truth.parquet"
+SIMULATION_MAX_CONTEXT_LISTINGS = 3
+# Extraction processes a simulation load uses. The tables are identical for any value.
+SIMULATION_LOAD_WORKERS = 4

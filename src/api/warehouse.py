@@ -7,9 +7,10 @@ Three responsibilities live here:
    It works on its own copy, `SERVING_DB_PATH`, cloned from the batch warehouse on first
    start or simulated from scratch when no batch warehouse exists (as in a fresh
    container). Live demo traffic therefore cannot leak into training data.
-2. The live write path. One ingested event becomes a `fact_events` row with a session
-   assigned by the same 30-minute rule the batch sessionizer uses, any cross-app
-   comparisons it completes, and upserts of `dim_products` and `dim_users`.
+2. The live write path. One ingested screen is extracted and written by
+   `event_loader.ingest_event`, the same write function the batch loader uses, with a
+   session assigned by the batch sessionizer's 30-minute rule; then `dim_users` is updated
+   and the cross-app comparisons the event completes are recorded.
 3. Read queries for the dashboard, the monitor, and user profiles.
 
 DuckDB allows one read-write process per database file, so every reader (dashboard,
@@ -41,6 +42,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import duckdb
 import polars as pl
 
+from src.features.event_loader import ingest_event, registry_from_warehouse, warehouse_action
 from src.features.migrations import migrate
 
 from src.config import (
@@ -51,7 +53,6 @@ from src.config import (
     SERVING_SIMULATION_DAYS,
     SERVING_SIMULATION_USERS,
     USD_TO_INR_RATE,
-    WAREHOUSE_ACTIONS,
 )
 
 CLOCK_SIMULATED = "simulated"
@@ -66,11 +67,6 @@ def to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
     if value.tzinfo is not None:
         value = value.astimezone(timezone.utc).replace(tzinfo=None)
     return value
-
-
-def warehouse_action(extracted_action: str) -> str:
-    """Maps an extracted intent onto the warehouse funnel of view, cart, and buy."""
-    return extracted_action if extracted_action in WAREHOUSE_ACTIONS else "view"
 
 
 def normalized_price_inr(price: Optional[float], currency: Optional[str]) -> Optional[float]:
@@ -184,6 +180,7 @@ class ServingWarehouse:
         self.db_path = Path(db_path)
         self.con = duckdb.connect(str(self.db_path))
         self.lock = threading.RLock()
+        self._registry: Optional[Any] = None
         self._latest = self._query_latest_timestamp()
         self.clock = ServingClock(self._latest, mode=clock_mode)
 
@@ -308,25 +305,35 @@ class ServingWarehouse:
             )
         return len(candidates)
 
+    @property
+    def registry(self) -> Any:
+        """The product registry, rebuilt from `dim_products` on first use."""
+        if self._registry is None:
+            with self.lock:
+                if self._registry is None:
+                    self._registry = registry_from_warehouse(self.con)
+        return self._registry
+
     def record_event(
         self,
         user_id: str,
         app_name: str,
-        product: Dict[str, Any],
+        raw_text: str,
         timestamp: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """
-        Stores one extracted product interaction and returns what was written.
+        Extracts one raw screen and stores it; returns what was written.
 
-        `product` is an `ExtractedProduct` dump. The whole write is one transaction, so a
-        failure leaves no partial event, session, or comparison behind.
+        The screen goes through `event_loader.ingest_event`, the batch loader's write
+        function, so `raw_events`, `fact_events`, `fact_price_observations`, and
+        `dim_products` receive exactly the rows a batch load would write. The whole write is
+        one transaction, so a failure leaves no partial event, session, or comparison
+        behind. `product` in the result is the focal `ExtractedProduct` (None when the
+        screen held no text) and `products` every listing on the screen.
         """
         ts = to_naive_utc(timestamp) or self.clock.now()
-        action = warehouse_action(str(product.get("action", "view")))
-        product_id = str(product["canonical_product_id"])
-        price = product.get("price")
-        currency = product.get("currency")
         event_id = f"{LIVE_EVENT_PREFIX}{uuid.uuid4().hex[:16]}"
+        registry = self.registry
 
         with self.lock:
             self.con.execute("BEGIN TRANSACTION")
@@ -336,34 +343,16 @@ class ServingWarehouse:
                 ).fetchone()[0]
                 session_id = self._assign_session(user_id, ts)
 
-                self.con.execute(
-                    """
-                    INSERT INTO fact_events (
-                        event_id, user_id, timestamp, app_name, canonical_product_id,
-                        action, price, currency, session_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    [event_id, user_id, ts, app_name, product_id, action, price, currency, session_id],
+                products, _ = ingest_event(
+                    self.con,
+                    {
+                        "event_id": event_id, "user_id": user_id, "timestamp": ts,
+                        "app_name": app_name, "raw_text": raw_text, "session_id": session_id,
+                    },
+                    registry=registry,
                 )
-
-                product_exists = self.con.execute(
-                    "SELECT COUNT(*) > 0 FROM dim_products WHERE canonical_product_id = ?", [product_id]
-                ).fetchone()[0]
-                if not product_exists:
-                    # Same column conventions as the batch loader: the title column holds
-                    # the canonical name and the average price is normalized to INR.
-                    self.con.execute(
-                        """
-                        INSERT INTO dim_products (
-                            canonical_product_id, brand, product_title, category_l1, category_l2, avg_price
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        [
-                            product_id, product.get("brand"), product.get("canonical_name"),
-                            product.get("category_l1"), product.get("category_l2"),
-                            normalized_price_inr(price, currency),
-                        ],
-                    )
+                focal = next((p for p in products if p.is_focal), products[0] if products else None)
+                action = warehouse_action(str(focal.action)) if focal is not None else "view"
 
                 if is_new_user:
                     self.con.execute(
@@ -382,7 +371,11 @@ class ServingWarehouse:
                         [ts, user_id, user_id],
                     )
 
-                comparisons = self._record_comparisons(event_id, user_id, product_id, app_name, ts)
+                comparisons = 0
+                if focal is not None and focal.canonical_product_id:
+                    comparisons = self._record_comparisons(
+                        event_id, user_id, focal.canonical_product_id, app_name, ts
+                    )
                 self.con.execute("COMMIT")
             except Exception:
                 self.con.execute("ROLLBACK")
@@ -400,6 +393,8 @@ class ServingWarehouse:
             "session_id": session_id,
             "is_new_user": bool(is_new_user),
             "cross_app_comparisons_detected": comparisons,
+            "product": focal,
+            "products": products,
         }
 
     # ------------------------------------------------------------------ reads

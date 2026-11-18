@@ -107,13 +107,18 @@ class TelemetryService:
         """Extracts the product from raw text and stores the interaction."""
         timestamp = payload.timestamp or self.warehouse.clock.now()
         with self._extraction_lock:
+            stored = self.warehouse.record_event(
+                user_id=payload.user_id,
+                app_name=payload.app_name,
+                raw_text=payload.raw_text,
+                timestamp=timestamp,
+            )
+        product = stored.pop("product")
+        stored.pop("products")
+        if product is None:
+            # A screen with no text still stores an event; the response reports the empty
+            # extraction of the whole text.
             product = process(payload.raw_text, app_source=payload.app_name, timestamp=timestamp)
-        stored = self.warehouse.record_event(
-            user_id=payload.user_id,
-            app_name=payload.app_name,
-            product=product.model_dump(),
-            timestamp=timestamp,
-        )
         return IngestResponse(**stored, product=product)
 
     # ---------------------------------------------------------------- user scoring

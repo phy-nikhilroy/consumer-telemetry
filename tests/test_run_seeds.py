@@ -21,6 +21,10 @@ from src.config import ARTIFACTS_DIR, DEFAULT_DB_PATH, FEATURES_DIR, RANDOM_SEED
 
 USERS = 24
 DAYS = 30
+# The run_simulation determinism and path tests compare generated files only; every event is
+# extracted on load, so they use a short window. The seed_runs fixture keeps DAYS, which
+# the model chain needs.
+SIM_DAYS = 3
 AGG_KEYS = {"mean", "std", "min", "max", "n"}
 
 
@@ -61,13 +65,15 @@ def _agg_leaves(obj: Any, prefix: str = "") -> Dict[str, dict]:
 
 @pytest.fixture(scope="module")
 def seed_runs(tmp_path_factory: pytest.TempPathFactory) -> Dict[str, Any]:
-    """Runs seed 1 twice and seed 2 once, recording protected-directory listings."""
+    """Runs RANDOM_SEED twice and seed 2 once, recording protected-directory listings."""
     from src.experiments.run_seeds import run_one_seed
 
     root = tmp_path_factory.mktemp("seeds")
     before = _listing(FEATURES_DIR, ARTIFACTS_DIR)
-    a1 = run_one_seed(1, root / "a1", USERS, DAYS)
-    a2 = run_one_seed(1, root / "a2", USERS, DAYS)
+    # The repeated seed is the tiny warehouse's, so its screens are already extracted when
+    # the session fixture ran first; the comparison is the same for any pair of seeds.
+    a1 = run_one_seed(RANDOM_SEED, root / "a1", USERS, DAYS)
+    a2 = run_one_seed(RANDOM_SEED, root / "a2", USERS, DAYS)
     b = run_one_seed(2, root / "b", USERS, DAYS)
     after = _listing(FEATURES_DIR, ARTIFACTS_DIR)
     return {"root": root, "a1": a1, "a2": a2, "b": b, "before": before, "after": after}
@@ -143,8 +149,8 @@ def test_run_simulation_default_equals_explicit_default_seed(tmp_path):
     from src.ingestion.simulate_users import run_simulation
 
     p1, p2 = tmp_path / "a.parquet", tmp_path / "b.parquet"
-    run_simulation(num_users=USERS, days=DAYS, db_path=str(tmp_path / "a.duckdb"), output_parquet=str(p1))
-    run_simulation(num_users=USERS, days=DAYS, db_path=str(tmp_path / "b.duckdb"),
+    run_simulation(num_users=USERS, days=SIM_DAYS, db_path=str(tmp_path / "a.duckdb"), output_parquet=str(p1))
+    run_simulation(num_users=USERS, days=SIM_DAYS, db_path=str(tmp_path / "b.duckdb"),
                    output_parquet=str(p2), seed=RANDOM_SEED)
     assert pl.read_parquet(p1).equals(pl.read_parquet(p2))
 
@@ -157,7 +163,7 @@ def test_run_simulation_seed_changes_events_and_is_reproducible(tmp_path):
 
     def go(seed: int, name: str) -> "pl.DataFrame":
         out = tmp_path / f"{name}.parquet"
-        run_simulation(num_users=USERS, days=DAYS, db_path=str(tmp_path / f"{name}.duckdb"),
+        run_simulation(num_users=USERS, days=SIM_DAYS, db_path=str(tmp_path / f"{name}.duckdb"),
                        output_parquet=str(out), seed=seed)
         return pl.read_parquet(out)
 
@@ -188,7 +194,7 @@ def test_run_simulation_writes_only_to_given_paths(tmp_path):
     from src.ingestion.simulate_users import run_simulation
 
     db, pq = tmp_path / "w.duckdb", tmp_path / "e.parquet"
-    run_simulation(num_users=USERS, days=DAYS, db_path=str(db), output_parquet=str(pq), seed=3)
+    run_simulation(num_users=USERS, days=SIM_DAYS, db_path=str(db), output_parquet=str(pq), seed=3)
     assert db.exists() and pq.exists()
 
 

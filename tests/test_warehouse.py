@@ -28,17 +28,14 @@ from src.api.warehouse import (
 from src.config import SCHEMA_SQL_PATH, USD_TO_INR_RATE
 
 
-def _product(product_id: str = "prod_test", action: str = "view", price: float = 100.0, currency: str = "INR") -> dict:
-    return {
-        "canonical_product_id": product_id,
-        "canonical_name": "Test Brand Test Product",
-        "brand": "Test Brand",
-        "category_l1": "Electronics",
-        "category_l2": "Smartphones",
-        "action": action,
-        "price": price,
-        "currency": currency,
-    }
+_ACTION_SNIPPETS = {"view": "", "cart": "Add to Cart", "buy": "Buy Now", "wishlist": "Add to Wishlist"}
+
+
+def _screen(name: str = "Zentrix Q7 Trail Speaker", action: str = "view", price: float = 100.0,
+            currency: str = "INR") -> str:
+    """One-line screen text for a product the batch warehouse has never seen."""
+    shown = f"\u20b9{int(price)}" if currency == "INR" else f"${price:.2f}"
+    return f"{name} {shown} 4.2 out of 5 stars {_ACTION_SNIPPETS[action]}".strip()
 
 
 def test_helpers():
@@ -80,7 +77,7 @@ def test_ensure_serving_warehouse_reset_rebuilds(tiny_warehouse: Path, tmp_path:
     target = tmp_path / "reset.duckdb"
     ensure_serving_warehouse(db_path=target, source_db_path=tiny_warehouse)
     warehouse = ServingWarehouse(target)
-    warehouse.record_event("reset_user", "flipkart", _product())
+    warehouse.record_event("reset_user", "flipkart", _screen())
     warehouse.close()
     assert ensure_serving_warehouse(db_path=target, source_db_path=tiny_warehouse, reset=True) == "copied"
     con = duckdb.connect(str(target), read_only=True)
@@ -105,18 +102,31 @@ def test_serving_clock_modes():
 
 
 def test_live_writes_match_batch_sessionizer(tiny_warehouse: Path, tmp_path: Path):
-    """Replaying events one by one reproduces the batch sessions and comparisons."""
+    """
+    Replaying raw events one by one reproduces the batch sessions and comparisons.
+
+    The replay warehouse starts empty but resolves products with the registry rebuilt
+    from the batch warehouse, so each replayed screen gets the batch product id. One user
+    (the one with the most comparisons) is replayed: every live event is a full
+    extraction, and the first week of one user's history already covers sessions and
+    comparisons. A comparison ends at its later event, so the first week's comparisons are
+    exactly those the first week's events produce.
+    """
+    from src.features.event_loader import registry_from_warehouse
+
     source = duckdb.connect(str(tiny_warehouse), read_only=True)
     try:
+        registry = registry_from_warehouse(source)
         users = [r[0] for r in source.execute(
-            "SELECT user_id FROM fact_cross_app_comparisons GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT 3"
+            "SELECT user_id FROM fact_cross_app_comparisons GROUP BY user_id ORDER BY COUNT(*) DESC, user_id LIMIT 1"
         ).fetchall()]
         params = {"users": users}
         events = source.execute(
             """
-            SELECT fe.user_id, fe.timestamp, fe.app_name, fe.canonical_product_id, fe.action,
-                   CAST(fe.price AS DOUBLE), fe.currency, fe.session_id
-            FROM fact_events fe WHERE fe.user_id IN (SELECT UNNEST($users))
+            SELECT fe.user_id, fe.timestamp, fe.app_name, re.raw_text, fe.canonical_product_id, fe.session_id
+            FROM fact_events fe JOIN raw_events re USING (event_id)
+            WHERE fe.user_id IN (SELECT UNNEST($users))
+              AND fe.timestamp < (SELECT MIN(timestamp) FROM fact_events) + INTERVAL 7 DAY
             ORDER BY fe.timestamp, fe.event_id
             """,
             params,
@@ -125,6 +135,7 @@ def test_live_writes_match_batch_sessionizer(tiny_warehouse: Path, tmp_path: Pat
             """
             SELECT user_id, canonical_product_id, primary_app, compared_app, first_viewed, last_viewed, session_id
             FROM fact_cross_app_comparisons WHERE user_id IN (SELECT UNNEST($users))
+              AND last_viewed < (SELECT MIN(timestamp) FROM fact_events) + INTERVAL 7 DAY
             """,
             params,
         ).fetchall())
@@ -138,11 +149,11 @@ def test_live_writes_match_batch_sessionizer(tiny_warehouse: Path, tmp_path: Pat
     con.close()
 
     warehouse = ServingWarehouse(empty)
+    warehouse._registry = registry
     try:
-        for user_id, ts, app, product_id, action, price, currency, batch_session in events:
-            stored = warehouse.record_event(
-                user_id, app, _product(product_id, action, price, currency), timestamp=ts
-            )
+        for user_id, ts, app, raw_text, product_id, batch_session in events:
+            stored = warehouse.record_event(user_id, app, raw_text, timestamp=ts)
+            assert stored["product"].canonical_product_id == product_id, (user_id, ts)
             assert stored["session_id"] == batch_session, (user_id, ts)
 
         live_comparisons = set(warehouse.con.execute(
@@ -160,21 +171,23 @@ def test_record_event_upserts_dimensions(serving_db: Path):
     warehouse = ServingWarehouse(serving_db)
     try:
         before = warehouse.counts()
-        first = warehouse.record_event("brand_new", "amazon_us", _product("new_prod", "wishlist", 10.0, "USD"))
+        first = warehouse.record_event("brand_new", "amazon_us", _screen(action="wishlist", price=10.0, currency="USD"))
+        product_id = first["product"].canonical_product_id
         assert first["is_new_user"] is True
         assert first["stored_action"] == "view"
         assert first["session_id"] == "brand_new_1"
 
         second = warehouse.record_event(
-            "brand_new", "flipkart", _product("new_prod", "buy", 900.0, "INR"),
+            "brand_new", "flipkart", _screen(action="buy", price=900.0),
             timestamp=first["timestamp"] + timedelta(minutes=10),
         )
         assert second["is_new_user"] is False
+        assert second["product"].canonical_product_id == product_id
         assert second["session_id"] == "brand_new_1"
         assert second["cross_app_comparisons_detected"] == 1
 
         third = warehouse.record_event(
-            "brand_new", "flipkart", _product("new_prod", "view"),
+            "brand_new", "flipkart", _screen(),
             timestamp=first["timestamp"] + timedelta(hours=3),
         )
         assert third["session_id"] == "brand_new_2"
@@ -189,8 +202,11 @@ def test_record_event_upserts_dimensions(serving_db: Path):
             "SELECT total_events, first_seen FROM dim_users WHERE user_id = 'brand_new'"
         ).fetchone()
         assert total == 3 and first_seen == first["timestamp"]
-        avg_price = warehouse.scalar("SELECT CAST(avg_price AS DOUBLE) FROM dim_products WHERE canonical_product_id = 'new_prod'")
-        assert avg_price == pytest.approx(10.0 * USD_TO_INR_RATE)
+        # avg_price is the mean INR price over every observation of the product.
+        avg_price = warehouse.scalar(
+            "SELECT CAST(avg_price AS DOUBLE) FROM dim_products WHERE canonical_product_id = ?", [product_id]
+        )
+        assert avg_price == pytest.approx((10.0 * USD_TO_INR_RATE + 900.0 + 100.0) / 3, abs=0.01)
     finally:
         warehouse.close()
 
@@ -205,7 +221,7 @@ def test_record_event_rolls_back_on_failure(serving_db: Path, monkeypatch: pytes
 
         monkeypatch.setattr(warehouse, "_record_comparisons", boom)
         with pytest.raises(RuntimeError):
-            warehouse.record_event("rollback_user", "flipkart", _product("rollback_prod"))
+            warehouse.record_event("rollback_user", "flipkart", _screen("Quorvel K2 Desk Lamp"))
         assert warehouse.counts() == before
         assert not warehouse.user_exists("rollback_user")
     finally:
@@ -216,7 +232,7 @@ def test_reference_date_covers_future_event(serving_db: Path):
     warehouse = ServingWarehouse(serving_db)
     try:
         future = warehouse.clock.now() + timedelta(days=2)
-        warehouse.record_event("time_traveller", "walmart", _product(), timestamp=future)
+        warehouse.record_event("time_traveller", "walmart", _screen(currency="USD"), timestamp=future)
         assert warehouse.reference_date() >= future
         assert warehouse.latest_event_timestamp() == future
     finally:

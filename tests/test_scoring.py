@@ -95,8 +95,7 @@ def test_lifetime_value_for_buyer_and_non_buyer(serving_db: Path, registry: Mode
             "SELECT user_id FROM fact_events WHERE action = 'buy' GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT 1"
         )
         warehouse.record_event(
-            "window_only", "flipkart",
-            {"canonical_product_id": "p1", "canonical_name": "P", "action": "view", "price": 10.0, "currency": "INR"},
+            "window_only", "flipkart", "Zentrix Q7 Trail Speaker \u20b910 4.2 out of 5 stars",
         )
         reference = warehouse.reference_date()
         scorer = UserScorer(registry)

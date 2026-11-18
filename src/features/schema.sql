@@ -73,6 +73,17 @@ CREATE TABLE IF NOT EXISTS dim_users (
 );
 
 
+-- The product matcher's decisions, so a registry rebuilt from the warehouse resolves every
+-- listing exactly as the load that wrote it did. alias_key is a listing's exact v1.0 key and
+-- canonical_product_id the product it resolved to; the row with alias_key equal to
+-- canonical_product_id is the product's registration. source_observation_id
+-- (`<event_id>#<listing position>`) is the listing that first produced the key.
+CREATE TABLE IF NOT EXISTS product_aliases (
+    alias_key VARCHAR PRIMARY KEY,
+    canonical_product_id VARCHAR NOT NULL,
+    source_observation_id VARCHAR NOT NULL
+);
+
 -- One row per pair of consecutive views of the same product by the same user on two
 -- different apps. primary_app is the app of the earlier event and compared_app the app of
 -- the later event; first_viewed and last_viewed are their timestamps.

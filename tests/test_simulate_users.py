@@ -54,17 +54,19 @@ def test_simulate_events_dataset():
         "archetype",
         "timestamp",
         "app_name",
-        "canonical_product_id",
-        "action",
-        "price",
-        "currency",
+        "raw_text",
+        "true_sku_key",
+        "true_action",
+        "true_price",
+        "true_currency",
+        "true_app",
     ]
     for key in required_keys:
         assert key in first_event
 
     # Test archetype behavior: window_shopper should rarely buy
     window_events = [e for e in events if e["archetype"] == "window_shopper"]
-    window_buys = [e for e in window_events if e["action"] == "buy"]
+    window_buys = [e for e in window_events if e["true_action"] == "buy"]
     assert len(window_buys) <= max(1, len(window_events) * 0.05)
 
 
@@ -167,7 +169,7 @@ def test_archetype_conversion_ordering():
     for e in events:
         bucket = by_archetype.setdefault(e["archetype"], {"events": 0, "buys": 0})
         bucket["events"] += 1
-        if e["action"] == "buy":
+        if e["true_action"] == "buy":
             bucket["buys"] += 1
 
     loyalist_rate = by_archetype["loyalist"]["buys"] / by_archetype["loyalist"]["events"]
