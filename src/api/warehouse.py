@@ -44,6 +44,7 @@ import polars as pl
 
 from src.features.event_loader import ingest_event, registry_from_warehouse, warehouse_action
 from src.features.migrations import migrate
+from src.features.sessionizer import comparison_insert_sql
 
 from src.config import (
     DEFAULT_CROSS_APP_WINDOW_MINUTES,
@@ -262,48 +263,34 @@ class ServingWarehouse:
         ts: datetime,
     ) -> int:
         """
-        Records the cross-app comparisons the new event completes, mirroring the batch
-        detector: an earlier view of the same product on an app that sorts before this
-        one, within the comparison window, that has no comparison recorded yet. Returns
-        the number of comparisons inserted.
+        Rebuilds this user's comparisons for the product with the batch detector's SQL
+        restricted to that user and product (exact for out-of-order timestamps). Returns
+        the number of comparisons the new event takes part in: rows where it is the later
+        event (last_viewed = ts, compared_app = app_name) plus rows where it is the earlier
+        event (first_viewed = ts, primary_app = app_name).
         """
-        candidates = self.con.execute(
+        self.con.execute(
+            "DELETE FROM fact_cross_app_comparisons WHERE user_id = ? AND canonical_product_id = ?",
+            [user_id, product_id],
+        )
+        prefix = f"cmp_{user_id}_{LIVE_EVENT_PREFIX}{uuid.uuid4().hex[:12]}_"
+        escaped = prefix.replace("'", "''")
+        self.con.execute(
+            comparison_insert_sql(
+                DEFAULT_CROSS_APP_WINDOW_MINUTES,
+                restrict_to_user_product=True,
+                id_prefix_sql=f"'{escaped}'",
+            ),
+            [user_id, product_id],
+        )
+        return self.con.execute(
             """
-            SELECT e1.session_id, e1.app_name, e1.timestamp
-            FROM fact_events e1
-            WHERE e1.user_id = ?
-              AND e1.canonical_product_id = ?
-              AND e1.app_name < ?
-              AND e1.timestamp <= ?
-              AND EPOCH(? - e1.timestamp) / 60.0 <= ?
-              AND e1.event_id != ?
-              AND NOT EXISTS (
-                  SELECT 1 FROM fact_cross_app_comparisons c
-                  WHERE c.user_id = e1.user_id
-                    AND c.canonical_product_id = e1.canonical_product_id
-                    AND c.first_viewed = e1.timestamp
-              )
-            ORDER BY e1.timestamp
+            SELECT COUNT(*) FROM fact_cross_app_comparisons
+            WHERE user_id = ? AND canonical_product_id = ?
+              AND ((last_viewed = ? AND compared_app = ?) OR (first_viewed = ? AND primary_app = ?))
             """,
-            [user_id, product_id, app_name, ts, ts, DEFAULT_CROSS_APP_WINDOW_MINUTES, event_id],
-        ).fetchall()
-
-        for session_id, primary_app, first_viewed in candidates:
-            duration = round((ts - first_viewed).total_seconds() / 60.0, 2)
-            self.con.execute(
-                """
-                INSERT INTO fact_cross_app_comparisons (
-                    comparison_id, user_id, session_id, canonical_product_id,
-                    primary_app, compared_app, first_viewed, last_viewed, duration_minutes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    f"cmp_{user_id}_{LIVE_EVENT_PREFIX}{uuid.uuid4().hex[:12]}",
-                    user_id, session_id, product_id, primary_app, app_name,
-                    first_viewed, ts, duration,
-                ],
-            )
-        return len(candidates)
+            [user_id, product_id, ts, app_name, ts, app_name],
+        ).fetchone()[0]
 
     @property
     def registry(self) -> Any:

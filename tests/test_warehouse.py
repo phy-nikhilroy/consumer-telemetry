@@ -264,3 +264,122 @@ def test_read_queries(serving_db: Path):
         assert not warehouse.user_exists("nobody")
     finally:
         warehouse.close()
+
+
+# ---------------------------------------------------------------------------
+# Bidirectional comparison detector, serving path (W4)
+# ---------------------------------------------------------------------------
+import random as _random
+
+from src.features.migrations import migrate as _migrate
+from src.features.sessionizer import detect_cross_app_comparisons as _detect_batch, sessionize_events as _sessionize
+
+_W4_T0 = datetime(2026, 10, 1, 10, 0, 0)
+_W4_COLS = (
+    "user_id, canonical_product_id, primary_app, compared_app, first_viewed, last_viewed, "
+    "CAST(duration_minutes AS DOUBLE), CAST(price_first_inr AS DOUBLE), CAST(price_last_inr AS DOUBLE), cheaper_app"
+)
+
+
+def _w4_warehouse(tmp_path: Path) -> ServingWarehouse:
+    path = tmp_path / "w4.duckdb"
+    con = duckdb.connect(str(path))
+    _migrate(con)
+    con.close()
+    return ServingWarehouse(path)
+
+
+def _w4_rows(warehouse: ServingWarehouse):
+    return sorted(
+        warehouse.con.execute(f"SELECT {_W4_COLS} FROM fact_cross_app_comparisons").fetchall(), key=str
+    )
+
+
+def test_live_a_then_b_primary_is_a(tmp_path: Path):
+    warehouse = _w4_warehouse(tmp_path)
+    try:
+        warehouse.record_event("u", "amazon_in", _screen(price=100), timestamp=_W4_T0)
+        warehouse.record_event("u", "flipkart", _screen(price=90), timestamp=_W4_T0 + timedelta(minutes=5))
+        rows = _w4_rows(warehouse)
+        assert len(rows) == 1
+        assert rows[0][2] == "amazon_in" and rows[0][3] == "flipkart"
+        assert rows[0][7] == 100.0 and rows[0][8] == 90.0 and rows[0][9] == "flipkart"
+    finally:
+        warehouse.close()
+
+
+def test_live_b_then_a_primary_is_b(tmp_path: Path):
+    warehouse = _w4_warehouse(tmp_path)
+    try:
+        warehouse.record_event("u", "flipkart", _screen(price=100), timestamp=_W4_T0)
+        warehouse.record_event("u", "amazon_in", _screen(price=90), timestamp=_W4_T0 + timedelta(minutes=5))
+        rows = _w4_rows(warehouse)
+        assert len(rows) == 1
+        assert rows[0][2] == "flipkart" and rows[0][3] == "amazon_in"
+        assert rows[0][4] == _W4_T0
+    finally:
+        warehouse.close()
+
+
+def test_live_same_app_twice_and_over_window_give_none(tmp_path: Path):
+    warehouse = _w4_warehouse(tmp_path)
+    try:
+        warehouse.record_event("u", "amazon_in", _screen(), timestamp=_W4_T0)
+        warehouse.record_event("u", "amazon_in", _screen(), timestamp=_W4_T0 + timedelta(minutes=5))
+        warehouse.record_event("u", "flipkart", _screen(), timestamp=_W4_T0 + timedelta(minutes=65, seconds=1))
+        assert _w4_rows(warehouse) == []
+    finally:
+        warehouse.close()
+
+
+def test_live_out_of_order_insert_splits_comparison(tmp_path: Path):
+    """A at 0 and B at 20 compare; inserting C at 10 replaces that pair with A-C and C-B."""
+    warehouse = _w4_warehouse(tmp_path)
+    try:
+        warehouse.record_event("u", "amazon_in", _screen(price=100), timestamp=_W4_T0)
+        warehouse.record_event("u", "flipkart", _screen(price=90), timestamp=_W4_T0 + timedelta(minutes=20))
+        assert [(r[2], r[3]) for r in _w4_rows(warehouse)] == [("amazon_in", "flipkart")]
+        warehouse.record_event("u", "walmart", _screen(price=80), timestamp=_W4_T0 + timedelta(minutes=10))
+        pairs = sorted((r[2], r[3]) for r in _w4_rows(warehouse))
+        assert pairs == [("amazon_in", "walmart"), ("walmart", "flipkart")]
+    finally:
+        warehouse.close()
+
+
+def test_live_insert_does_not_touch_other_products_or_users(tmp_path: Path):
+    warehouse = _w4_warehouse(tmp_path)
+    try:
+        other = "Quorvel K2 Desk Lamp"
+        warehouse.record_event("u", "amazon_in", _screen(other), timestamp=_W4_T0)
+        warehouse.record_event("u", "flipkart", _screen(other), timestamp=_W4_T0 + timedelta(minutes=1))
+        warehouse.record_event("v", "amazon_in", _screen(), timestamp=_W4_T0)
+        warehouse.record_event("v", "flipkart", _screen(), timestamp=_W4_T0 + timedelta(minutes=1))
+        before = _w4_rows(warehouse)
+        assert len(before) == 2
+        warehouse.record_event("u", "walmart", _screen(), timestamp=_W4_T0 + timedelta(minutes=2))
+        after = _w4_rows(warehouse)
+        assert set(before) <= set(after)
+    finally:
+        warehouse.close()
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_live_path_equals_batch_path_after_shuffled_inserts(tmp_path: Path, seed: int):
+    events = [
+        ("u", "amazon_in", 0, 100.0), ("u", "flipkart", 7, 90.0), ("u", "flipkart", 12, 95.0),
+        ("u", "walmart", 30, 85.0), ("u", "amazon_in", 80, 100.0), ("u", "flipkart", 95, 100.0),
+    ]
+    _random.Random(seed).shuffle(events)
+    warehouse = _w4_warehouse(tmp_path)
+    try:
+        for user, app, minute, price in events:
+            warehouse.record_event(user, app, _screen(price=price), timestamp=_W4_T0 + timedelta(minutes=minute))
+        live = _w4_rows(warehouse)
+        assert live, "the sequence must contain comparisons"
+        _sessionize(con=warehouse.con)
+        _detect_batch(con=warehouse.con)
+        assert _w4_rows(warehouse) == live
+        count = warehouse.con.execute("SELECT COUNT(*), COUNT(DISTINCT comparison_id) FROM fact_cross_app_comparisons").fetchone()
+        assert count[0] == count[1] == len(live)
+    finally:
+        warehouse.close()

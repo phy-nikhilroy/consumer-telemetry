@@ -84,6 +84,68 @@ def sessionize_events(
             con.close()
 
 
+COMPARISON_COLUMNS = (
+    "comparison_id, user_id, session_id, canonical_product_id, primary_app, compared_app, "
+    "first_viewed, last_viewed, duration_minutes, price_first_inr, price_last_inr, cheaper_app"
+)
+
+
+def comparison_insert_sql(
+    max_window_minutes: float,
+    restrict_to_user_product: bool = False,
+    id_prefix_sql: str = "CONCAT('cmp_', user_id, '_')",
+) -> str:
+    """
+    Returns the single INSERT ... SELECT that detects cross-app comparisons, shared by the
+    batch sessionizer and the serving write path. Events of one (user, product) are ordered
+    by (timestamp, event_id); each event with a predecessor on a different app within the
+    window yields one row (primary_app is the predecessor's app). With
+    restrict_to_user_product the query takes two positional parameters, user_id and
+    canonical_product_id, and only reads that user's events for that product.
+    """
+    where = "WHERE canonical_product_id IS NOT NULL"
+    if restrict_to_user_product:
+        where += " AND user_id = ? AND canonical_product_id = ?"
+    return f"""
+        INSERT INTO fact_cross_app_comparisons ({COMPARISON_COLUMNS})
+        WITH ordered AS (
+            SELECT
+                user_id, canonical_product_id, event_id, app_name, timestamp, session_id, price_inr,
+                LAG(app_name) OVER w AS prev_app,
+                LAG(timestamp) OVER w AS prev_ts,
+                LAG(session_id) OVER w AS prev_session,
+                LAG(price_inr) OVER w AS prev_price
+            FROM fact_events
+            {where}
+            WINDOW w AS (PARTITION BY user_id, canonical_product_id ORDER BY timestamp, event_id)
+        ),
+        pairs AS (
+            SELECT *, EPOCH(timestamp - prev_ts) / 60.0 AS minutes
+            FROM ordered
+            WHERE prev_app IS NOT NULL AND prev_app <> app_name
+        )
+        SELECT
+            CONCAT({id_prefix_sql}, ROW_NUMBER() OVER (ORDER BY user_id, canonical_product_id, timestamp, event_id)) AS comparison_id,
+            user_id,
+            prev_session AS session_id,
+            canonical_product_id,
+            prev_app AS primary_app,
+            app_name AS compared_app,
+            prev_ts AS first_viewed,
+            timestamp AS last_viewed,
+            CAST(ROUND(minutes, 2) AS DECIMAL(10,2)) AS duration_minutes,
+            prev_price AS price_first_inr,
+            price_inr AS price_last_inr,
+            CASE
+                WHEN prev_price IS NULL OR price_inr IS NULL OR prev_price = price_inr THEN NULL
+                WHEN price_inr < prev_price THEN app_name
+                ELSE prev_app
+            END AS cheaper_app
+        FROM pairs
+        WHERE minutes >= 0 AND minutes <= {max_window_minutes}
+    """
+
+
 def detect_cross_app_comparisons(
     con: Optional[duckdb.DuckDBPyConnection] = None,
     db_path: Optional[Union[str, Path]] = None,
@@ -93,6 +155,8 @@ def detect_cross_app_comparisons(
     Identifies sessions where a user browses the same canonical_product_id across
     distinct shopping apps within max_window_minutes (default 60 minutes).
     Populates fact_cross_app_comparisons.
+
+    The query is built by comparison_insert_sql, shared with the serving path.
     """
     should_close = False
     if con is None:
@@ -112,60 +176,17 @@ def detect_cross_app_comparisons(
                 compared_app VARCHAR NOT NULL,
                 first_viewed TIMESTAMP NOT NULL,
                 last_viewed TIMESTAMP NOT NULL,
-                duration_minutes DECIMAL(10,2) NOT NULL
+                duration_minutes DECIMAL(10,2) NOT NULL,
+                price_first_inr DECIMAL(18,2),
+                price_last_inr DECIMAL(18,2),
+                cheaper_app VARCHAR
             )
         """)
 
         # Clean existing comparisons before populating
         con.execute("DELETE FROM fact_cross_app_comparisons")
 
-        insert_query = f"""
-            INSERT INTO fact_cross_app_comparisons (
-                comparison_id,
-                user_id,
-                session_id,
-                canonical_product_id,
-                primary_app,
-                compared_app,
-                first_viewed,
-                last_viewed,
-                duration_minutes
-            )
-            WITH pairs AS (
-                SELECT
-                    e1.user_id,
-                    e1.session_id,
-                    e1.canonical_product_id,
-                    e1.app_name AS primary_app,
-                    e2.app_name AS compared_app,
-                    e1.timestamp AS first_viewed,
-                    e2.timestamp AS last_viewed,
-                    ROUND(EPOCH(e2.timestamp - e1.timestamp) / 60.0, 2) AS duration_minutes,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY e1.user_id, e1.canonical_product_id, e1.timestamp
-                        ORDER BY e2.timestamp
-                    ) AS rn
-                FROM fact_events e1
-                JOIN fact_events e2
-                  ON e1.user_id = e2.user_id
-                 AND e1.canonical_product_id = e2.canonical_product_id
-                 AND e1.app_name < e2.app_name
-                 AND e2.timestamp >= e1.timestamp
-                 AND EPOCH(e2.timestamp - e1.timestamp) / 60.0 <= {max_window_minutes}
-            )
-            SELECT
-                CONCAT('cmp_', user_id, '_', ROW_NUMBER() OVER ()) AS comparison_id,
-                user_id,
-                session_id,
-                canonical_product_id,
-                primary_app,
-                compared_app,
-                first_viewed,
-                last_viewed,
-                CAST(duration_minutes AS DECIMAL(10,2)) AS duration_minutes
-            FROM pairs
-            WHERE rn = 1
-        """
+        insert_query = comparison_insert_sql(max_window_minutes)
         con.execute(insert_query)
 
         # Compute summary metrics
