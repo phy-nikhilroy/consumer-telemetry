@@ -39,7 +39,7 @@ def test_compute_target_variables_temporal_boundary():
         ]
 
         con.executemany("""
-            INSERT INTO fact_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, events)
 
         targets_df = compute_target_variables(
@@ -310,7 +310,7 @@ def _build_warehouse(path: Path, start: datetime, end: datetime) -> Path:
     con = db.get_connection()
     try:
         con.execute(
-            "INSERT INTO dim_products VALUES ('p1','b','t','c1','c2',100.0), ('p2','b','t2','c1','c2',200.0)"
+            "INSERT INTO dim_products (canonical_product_id, brand, product_title, category_l1, category_l2, avg_price) VALUES ('p1','b','t','c1','c2',100.0), ('p2','b','t2','c1','c2',200.0)"
         )
         rows = []
         users = []
@@ -327,7 +327,7 @@ def _build_warehouse(path: Path, start: datetime, end: datetime) -> Path:
                     n += 1
                 day += 1
         con.executemany("INSERT INTO dim_users VALUES (?,?,?,?)", users)
-        con.executemany("INSERT INTO fact_events VALUES (?,?,?,?,?,?,?,?,?)", rows)
+        con.executemany("INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES (?,?,?,?,?,?,?,?,?)", rows)
     finally:
         con.close()
     return path

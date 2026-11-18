@@ -56,9 +56,9 @@ def _build_warehouse(path: Path, seed: int = 7) -> Path:
                 "action", "price", "currency", "session_id"],
     ).to_pandas()
     con.register("rows_df", frame)
-    con.execute("INSERT INTO fact_events SELECT * FROM rows_df")
+    con.execute("INSERT INTO fact_events BY NAME SELECT * FROM rows_df")
     con.unregister("rows_df")
-    con.execute("INSERT INTO dim_products VALUES ('p1','b','t','c1','c2',1000.0)")
+    con.execute("INSERT INTO dim_products (canonical_product_id, brand, product_title, category_l1, category_l2, avg_price) VALUES ('p1','b','t','c1','c2',1000.0)")
     con.close()
     return path
 
@@ -126,9 +126,9 @@ def test_holdout_actuals_exclude_purchase_exactly_at_calibration_end(tmp_path):
         "AND timestamp > TIMESTAMP '2026-10-18 00:00:00' "
         "AND timestamp <= TIMESTAMP '2026-10-27 00:00:00'"
     ).fetchone()[0]
-    con.execute("INSERT INTO fact_events VALUES ('x1','u0',TIMESTAMP '2026-10-18 00:00:00',"
+    con.execute("INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES ('x1','u0',TIMESTAMP '2026-10-18 00:00:00',"
                 "'amazon','p1','buy',100.0,'INR','sx')")
-    con.execute("INSERT INTO fact_events VALUES ('x2','u0',TIMESTAMP '2026-10-18 00:00:01',"
+    con.execute("INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES ('x2','u0',TIMESTAMP '2026-10-18 00:00:01',"
                 "'amazon','p1','buy',100.0,'INR','sx')")
     con.close()
     out = evaluate_clv_holdout(db, CAL_END, HOLDOUT_DAYS)
@@ -143,14 +143,14 @@ def test_holdout_window_upper_bound_inclusive(tmp_path):
     db = _build_warehouse(tmp_path / "w.duckdb", seed=5)
     con = duckdb.connect(str(db))
     # u_new buys before the cutoff and exactly at the window end and one second after.
-    con.execute("INSERT INTO fact_events VALUES ('y0','unew',TIMESTAMP '2026-10-10 00:00:00',"
+    con.execute("INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES ('y0','unew',TIMESTAMP '2026-10-10 00:00:00',"
                 "'amazon','p1','buy',100.0,'INR','s')")
     con.close()
     before = evaluate_clv_holdout(db, CAL_END, HOLDOUT_DAYS)["actual_total_purchases"]
     con = duckdb.connect(str(db))
-    con.execute("INSERT INTO fact_events VALUES ('y1','unew',TIMESTAMP '2026-10-27 00:00:00',"
+    con.execute("INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES ('y1','unew',TIMESTAMP '2026-10-27 00:00:00',"
                 "'amazon','p1','buy',100.0,'INR','s')")
-    con.execute("INSERT INTO fact_events VALUES ('y2','unew',TIMESTAMP '2026-10-27 00:00:01',"
+    con.execute("INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES ('y2','unew',TIMESTAMP '2026-10-27 00:00:01',"
                 "'amazon','p1','buy',100.0,'INR','s')")
     con.close()
     after = evaluate_clv_holdout(db, CAL_END, HOLDOUT_DAYS)["actual_total_purchases"]
@@ -394,12 +394,12 @@ def test_holdout_purchase_at_cutoff_is_calibration_not_actual(tmp_path):
 
     db = _build_warehouse(tmp_path / "w.duckdb", seed=9)
     con = duckdb.connect(str(db))
-    con.execute("INSERT INTO fact_events VALUES ('z0','unew',TIMESTAMP '2026-10-10 00:00:00',"
+    con.execute("INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES ('z0','unew',TIMESTAMP '2026-10-10 00:00:00',"
                 "'amazon','p1','buy',100.0,'INR','s')")
     con.close()
     before = evaluate_clv_holdout(db, CAL_END, HOLDOUT_DAYS)["actual_total_purchases"]
     con = duckdb.connect(str(db))
-    con.execute("INSERT INTO fact_events VALUES ('z1','unew',TIMESTAMP '2026-10-18 00:00:00',"
+    con.execute("INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES ('z1','unew',TIMESTAMP '2026-10-18 00:00:00',"
                 "'amazon','p1','buy',100.0,'INR','s')")
     con.close()
     after = evaluate_clv_holdout(db, CAL_END, HOLDOUT_DAYS)["actual_total_purchases"]

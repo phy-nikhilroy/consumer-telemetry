@@ -240,12 +240,15 @@ def build_warehouse(
             """
             INSERT INTO fact_events (
                 event_id, user_id, timestamp, app_name, canonical_product_id,
-                action, price, currency, session_id
+                action, price, currency, session_id, price_inr
             )
             SELECT
                 event_id, user_id, CAST(event_time AS TIMESTAMP), app_name,
                 canonical_product_id, action,
-                CAST(price AS DECIMAL(12,2)), currency, session_id
+                CAST(price AS DECIMAL(12,2)), currency, session_id,
+                -- RetailRocket prices are stored as INR (obfuscated units), so price_inr is
+                -- the price itself. The other extraction columns stay null.
+                CAST(price AS DECIMAL(18,2))
             FROM rr_events
             """
         )

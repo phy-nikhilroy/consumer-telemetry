@@ -192,3 +192,10 @@ CONFIDENCE_TRAIN_ROWS = 8_000
 CONFIDENCE_EVAL_ROWS = 3_000
 CONFIDENCE_PRICE_TOLERANCE = 0.01
 CONFIDENCE_ECE_BINS = 10
+
+
+# Warehouse schema version 2 (src/features/migrations.py). SCHEMA_VERSION is written to
+# schema_info by migrate(); EXTRACTOR_VERSION stamps every raw_events row so a later
+# re-extraction can tell which extractor produced the stored fields.
+SCHEMA_VERSION = "2"
+EXTRACTOR_VERSION = "2.0.0"

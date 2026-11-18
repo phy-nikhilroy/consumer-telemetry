@@ -31,7 +31,7 @@ def test_leak_free_reference_date_cutoff():
         ]
 
         con.executemany("""
-            INSERT INTO fact_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, events)
 
         df = compute_rfm_features(reference_date=ref_date, con=con)

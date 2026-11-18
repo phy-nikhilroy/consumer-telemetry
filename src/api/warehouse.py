@@ -41,11 +41,12 @@ if str(PROJECT_ROOT) not in sys.path:
 import duckdb
 import polars as pl
 
+from src.features.migrations import migrate
+
 from src.config import (
     DEFAULT_CROSS_APP_WINDOW_MINUTES,
     DEFAULT_DB_PATH,
     DEFAULT_SESSION_INACTIVITY_MINUTES,
-    SCHEMA_SQL_PATH,
     SERVING_DB_PATH,
     SERVING_SIMULATION_DAYS,
     SERVING_SIMULATION_USERS,
@@ -113,6 +114,12 @@ def ensure_serving_warehouse(
         finally:
             con.close()
         if populated:
+            # An existing serving warehouse may predate the current schema version.
+            con = duckdb.connect(str(target))
+            try:
+                migrate(con)
+            finally:
+                con.close()
             return "existing"
         target.unlink()
 
@@ -127,7 +134,7 @@ def ensure_serving_warehouse(
             catalog = con.execute("SELECT current_database()").fetchone()[0]
             con.execute(f'COPY FROM DATABASE batch_source TO "{catalog}"')
             con.execute("DETACH batch_source")
-            con.execute(SCHEMA_SQL_PATH.read_text(encoding="utf-8"))
+            migrate(con)
         finally:
             con.close()
         return "copied"

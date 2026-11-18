@@ -36,8 +36,11 @@ class DatabaseManager:
 
     def init_schema(self, schema_file: Optional[Union[str, Path]] = None) -> None:
         """
-        Executes schema DDL to create star schema tables.
+        Executes schema DDL to create star schema tables, then migrates the warehouse to
+        the current schema version, so an older warehouse gains the new tables and columns.
         """
+        from src.features.migrations import migrate
+
         sql_file = Path(schema_file) if schema_file else SCHEMA_SQL_PATH
         if not sql_file.exists():
             raise FileNotFoundError(f"Schema file not found at {sql_file}")
@@ -48,6 +51,7 @@ class DatabaseManager:
         con = self.get_connection()
         try:
             con.execute(ddl_statements)
+            migrate(con)
         finally:
             if self._shared_connection is None:
                 con.close()

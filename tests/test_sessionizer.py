@@ -31,7 +31,7 @@ def test_sessionize_events_inactivity_window():
         ]
 
         con.executemany("""
-            INSERT INTO fact_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, events)
 
         sessionize_events(con=con, inactivity_minutes=30.0)
@@ -69,7 +69,7 @@ def test_detect_cross_app_comparisons():
         ]
 
         con.executemany("""
-            INSERT INTO fact_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, price, currency, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, events)
 
         results = detect_cross_app_comparisons(con=con, max_window_minutes=60.0)
