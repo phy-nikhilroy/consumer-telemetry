@@ -14,7 +14,7 @@ NOTEBOOKS := 04_transformer_ner 14_feature_eda 16_model_evaluation 20_model_eval
 
 .PHONY: gate help setup venv-check test check run-pipeline simulate sessionize features models \
         pipeline notebooks report benchmark serving-db serving-reset api dashboard stream \
-        monitor api-benchmark docker-build compose-up compose-down
+        monitor data-checks api-benchmark docker-build compose-up compose-down
 
 help:
 	@echo "Available commands:"
@@ -49,6 +49,9 @@ setup:
 	uv venv $(VENV) --python 3.12
 	uv pip install --python $(PYTHON) -r requirements.txt
 	$(PYTHON) -m spacy download en_core_web_sm
+
+data-checks:
+	$(PYTHON) src/features/data_checks.py
 
 venv-check:
 	@test -f $(PYTHON) && echo "Python binary verified: $(PYTHON)" || (echo "Missing $(PYTHON)" && exit 1)
