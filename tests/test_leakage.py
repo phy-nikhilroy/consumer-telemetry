@@ -305,3 +305,100 @@ def test_clv_holdout_fit_unchanged_when_events_after_calibration_end_deleted(tmp
     for key in a["bgnbd_params"]:
         assert a["bgnbd_params"][key] == pytest.approx(b["bgnbd_params"][key], rel=1e-9)
     assert a["n_customers"] == b["n_customers"]
+
+
+# ---------------------------------------------------------------------------
+# W5: every feature table read is cut at the reference date
+# ---------------------------------------------------------------------------
+
+from hypothesis import given, settings, strategies as st
+
+from src.features.behavioral_features import compute_behavioral_features
+from src.features.migrations import migrate
+
+W5_REF = datetime(2026, 10, 10, 12, 0, 0)
+_BASE = datetime(2026, 10, 8, 12, 0, 0)
+_offsets = st.integers(min_value=-86400, max_value=86400 * 2)  # seconds around the reference date
+
+_event_st = st.tuples(
+    st.sampled_from(["u1", "u2"]), _offsets, st.sampled_from(["amazon_in", "flipkart", "myntra"]),
+    st.sampled_from(["p1", "p2"]), st.sampled_from(["view", "cart", "buy"]),
+    st.integers(50, 150), st.one_of(st.none(), st.integers(0, 40)),
+)
+_obs_st = st.tuples(
+    st.sampled_from(["u1", "u2"]), _offsets, st.sampled_from(["amazon_in", "flipkart", "myntra"]),
+    st.sampled_from(["p1", "p2"]), st.integers(50, 150),
+)
+_comp_st = st.tuples(
+    st.sampled_from(["u1", "u2"]), _offsets, st.integers(0, 7200), st.integers(50, 150), st.integers(50, 150),
+)
+
+
+def _build(events, obs, comps):
+    con = duckdb.connect(":memory:")
+    migrate(con)
+    for i, (u, off, app, prod, act, price, disc) in enumerate(events):
+        con.execute(
+            "INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, "
+            "price, currency, session_id, discount_pct, price_inr) VALUES (?, ?, ?, ?, ?, ?, ?, 'INR', ?, ?, ?)",
+            [f"e{i}", u, W5_REF + timedelta(seconds=off), app, prod, act, price, f"s{i}", disc, price],
+        )
+    for i, (u, off, app, prod, price) in enumerate(obs):
+        con.execute(
+            "INSERT INTO fact_price_observations (observation_id, source_event_id, user_id, timestamp, app_name, "
+            "canonical_product_id, price_inr, is_focal) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)",
+            [f"o{i}", f"x{i}", u, W5_REF + timedelta(seconds=off), app, prod, price],
+        )
+    for i, (u, off, dur, p1, p2) in enumerate(comps):
+        first = W5_REF + timedelta(seconds=off)
+        con.execute(
+            "INSERT INTO fact_cross_app_comparisons (comparison_id, user_id, session_id, canonical_product_id, "
+            "primary_app, compared_app, first_viewed, last_viewed, duration_minutes, price_first_inr, "
+            "price_last_inr) VALUES (?, ?, 's', 'p1', 'amazon_in', 'flipkart', ?, ?, 1.0, ?, ?)",
+            [f"c{i}", u, first, first + timedelta(seconds=dur), p1, p2],
+        )
+    return con
+
+
+@settings(max_examples=40, deadline=None)
+@given(st.lists(_event_st, max_size=12), st.lists(_obs_st, max_size=8), st.lists(_comp_st, max_size=5))
+def test_behavioral_features_unchanged_after_deleting_rows_past_reference_date(events, obs, comps):
+    con = _build(events, obs, comps)
+    before = compute_behavioral_features(reference_date=W5_REF, con=con).sort("user_id")
+    con.execute("DELETE FROM fact_events WHERE timestamp > ?", [W5_REF])
+    con.execute("DELETE FROM fact_price_observations WHERE timestamp > ?", [W5_REF])
+    con.execute("DELETE FROM fact_cross_app_comparisons WHERE last_viewed > ?", [W5_REF])
+    after = compute_behavioral_features(reference_date=W5_REF, con=con).sort("user_id")
+    con.close()
+    assert before.columns == after.columns
+    assert before.to_dicts() == after.to_dicts()
+
+
+@settings(max_examples=40, deadline=None)
+@given(st.lists(_event_st, max_size=12), st.lists(_obs_st, max_size=8), st.lists(_comp_st, max_size=5))
+def test_price_feature_ranges_and_null_rule(events, obs, comps):
+    con = _build(events, obs, comps)
+    df = compute_behavioral_features(reference_date=W5_REF, con=con)
+    con.close()
+    for r in df.to_dicts():
+        rate, n = r["chose_cheaper_app_rate"], r["informed_purchase_count"]
+        assert n >= 0
+        assert (rate is None) == (n == 0)
+        if rate is not None:
+            assert 0.0 <= rate <= 1.0
+        gap = r["avg_abs_price_gap_pct"]
+        assert gap is None or gap >= 0.0
+        assert 0.0 <= r["pct_purchases_with_discount"] <= 1.0
+        assert 0.0 <= r["avg_discount_pct_on_purchases"] <= 40.0
+
+
+def test_price_observations_after_reference_date_do_not_inform_purchases():
+    con = _build(
+        [("u1", -3600, "flipkart", "p1", "buy", 90, None)],
+        [("u1", 3600, "amazon_in", "p1", 100)],
+        [],
+    )
+    df = compute_behavioral_features(reference_date=W5_REF, con=con)
+    row = df.to_dicts()[0]
+    assert row["informed_purchase_count"] == 0
+    assert row["chose_cheaper_app_rate"] is None

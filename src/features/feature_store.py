@@ -24,6 +24,7 @@ import polars as pl
 
 from src.config import (
     DEFAULT_DB_PATH,
+    MISSING_AS_SENTINEL_FEATURES,
     PREDICTION_WINDOW_DAYS,
     RECENCY_FEATURES,
     RECENCY_NULL_SENTINEL_DAYS,
@@ -347,8 +348,10 @@ def fill_missing_features(
     Recency columns (`RECENCY_FEATURES`) take `recency_sentinel`, because a null there
     means the event never happened and zero would claim it happened today. A per-column
     `recency_fill` overrides the sentinel; distance-based methods use it to censor at the
-    longest observed recency instead (see `censored_recency_fill`). Every other feature
-    is a count, ratio, or amount whose null genuinely means zero.
+    longest observed recency instead (see `censored_recency_fill`). Columns in
+    `MISSING_AS_SENTINEL_FEATURES` take their out-of-range sentinel, because a null there
+    means the quantity could not be measured. Every other feature is a count, ratio, or
+    amount whose null genuinely means zero.
 
     Returns only the requested columns, cast to Float64.
     """
@@ -359,6 +362,8 @@ def fill_missing_features(
         column = pl.col(name).cast(pl.Float64)
         if name in RECENCY_FEATURES:
             fill = float(overrides.get(name, recency_sentinel))
+        elif name in MISSING_AS_SENTINEL_FEATURES:
+            fill = float(MISSING_AS_SENTINEL_FEATURES[name])
         else:
             fill = 0.0
         expressions.append(column.fill_null(fill).fill_nan(fill).alias(name))

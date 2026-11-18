@@ -19,7 +19,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import duckdb
 import polars as pl
-from src.config import DEFAULT_DB_PATH, BEHAVIORAL_FEATURES_PATH, USD_TO_INR_RATE
+from src.config import (
+    BEHAVIORAL_FEATURES_PATH,
+    CROSS_APP_PRICE_LOOKBACK_HOURS,
+    DEFAULT_DB_PATH,
+    USD_TO_INR_RATE,
+)
 from src.features.database import DatabaseManager
 
 DEFAULT_BEHAVIORAL_PATH = BEHAVIORAL_FEATURES_PATH
@@ -31,11 +36,23 @@ def compute_behavioral_features(
     db_path: Optional[Union[str, Path]] = None,
     usd_to_inr_rate: float = USD_TO_INR_RATE,
     user_ids: Optional[Sequence[str]] = None,
+    lookback_hours: int = CROSS_APP_PRICE_LOOKBACK_HOURS,
 ) -> pl.DataFrame:
     """
     Computes 15+ behavioral and cross-app features per user.
-    All calculations are strictly bounded by reference_date (timestamp <= reference_date)
-    to prevent target leakage.
+    Every table read is bounded by reference_date: events and price observations by
+    timestamp, comparisons by both first_viewed and last_viewed, to prevent target leakage.
+
+    Price features read only stored per-event values (price_inr, discount_pct) and
+    per-user price observations, never a product-level average:
+    - avg_discount_pct_on_purchases, pct_purchases_with_discount: over buy events, from the
+      discount shown on the screen (a missing discount counts as none); 0.0 with no buys.
+    - informed_purchase_count: buys for which the user saw the same product priced on a
+      different app within [buy - lookback_hours, buy].
+    - chose_cheaper_app_rate: share of informed buys whose price_inr is at most the lowest
+      such other-app price; null with no informed buy.
+    - avg_abs_price_gap_pct: mean absolute price gap across the user's comparisons, as a
+      percent of the first price; null with none.
 
     `user_ids` restricts the computation to those users, for per-user scoring at serving
     time. Every feature is a per-user aggregate, so the restricted result equals the
@@ -69,12 +86,13 @@ def compute_behavioral_features(
                     fe.action,
                     fe.price,
                     fe.currency,
+                    fe.price_inr,
+                    fe.discount_pct,
                     CASE
                         WHEN fe.currency = 'USD' THEN fe.price * {usd_to_inr_rate}
                         ELSE fe.price
                     END AS norm_price,
-                    dp.category_l1,
-                    dp.avg_price AS prod_avg_price
+                    dp.category_l1
                 FROM fact_events fe
                 LEFT JOIN dim_products dp ON fe.canonical_product_id = dp.canonical_product_id
                 WHERE fe.timestamp <= CAST('{ref_str}' AS TIMESTAMP)
@@ -136,10 +154,39 @@ def compute_behavioral_features(
             cross_app_counts AS (
                 SELECT
                     user_id,
-                    COUNT(*) AS cross_app_comparison_count
+                    COUNT(*) AS cross_app_comparison_count,
+                    ROUND(AVG(
+                        ABS(CAST(price_last_inr AS DOUBLE) - CAST(price_first_inr AS DOUBLE))
+                        / NULLIF(CAST(price_first_inr AS DOUBLE), 0.0) * 100.0
+                    ), 2) AS avg_abs_price_gap_pct
                 FROM fact_cross_app_comparisons
                 WHERE first_viewed <= CAST('{ref_str}' AS TIMESTAMP)
+                  AND last_viewed <= CAST('{ref_str}' AS TIMESTAMP)
                 {comparison_filter}
+                GROUP BY user_id
+            ),
+            informed_purchases AS (
+                SELECT
+                    b.user_id,
+                    b.event_id,
+                    CASE WHEN b.price_inr <= MIN(o.price_inr) THEN 1.0 ELSE 0.0 END AS chose_cheaper
+                FROM eligible_events b
+                JOIN fact_price_observations o
+                  ON o.user_id = b.user_id
+                 AND o.canonical_product_id = b.canonical_product_id
+                 AND o.app_name <> b.app_name
+                 AND o.timestamp <= b.timestamp
+                 AND o.timestamp >= b.timestamp - INTERVAL ({int(lookback_hours)}) HOUR
+                 AND o.timestamp <= CAST('{ref_str}' AS TIMESTAMP)
+                WHERE b.action = 'buy'
+                GROUP BY b.user_id, b.event_id, b.price_inr
+            ),
+            informed_stats AS (
+                SELECT
+                    user_id,
+                    COUNT(*) AS informed_purchase_count,
+                    ROUND(AVG(chose_cheaper), 4) AS chose_cheaper_app_rate
+                FROM informed_purchases
                 GROUP BY user_id
             ),
             user_features AS (
@@ -150,12 +197,9 @@ def compute_behavioral_features(
                     ec.app_entropy,
                     ec.dominant_app_share,
                     COALESCE(cac.cross_app_comparison_count, 0) AS cross_app_comparison_count,
-                    -- Simulated choice rate: users with high comparisons that bought cheaper
-                    ROUND(COALESCE(
-                        CAST(COUNT(*) FILTER (WHERE ee.action = 'buy' AND ee.norm_price < ee.prod_avg_price) AS FLOAT) /
-                        NULLIF(COUNT(*) FILTER (WHERE ee.action = 'buy'), 0),
-                        0.5
-                    ), 4) AS chose_cheaper_app_rate,
+                    cac.avg_abs_price_gap_pct,
+                    COALESCE(ist.informed_purchase_count, 0) AS informed_purchase_count,
+                    ist.chose_cheaper_app_rate,
 
                     -- ENGAGEMENT PATTERNS
                     ROUND(COALESCE(
@@ -175,13 +219,12 @@ def compute_behavioral_features(
 
                     -- PRICE SENSITIVITY
                     ROUND(COALESCE(
-                        AVG(CASE WHEN ee.prod_avg_price > ee.norm_price THEN ((ee.prod_avg_price - ee.norm_price) / ee.prod_avg_price) * 100.0 ELSE 0.0 END)
-                        FILTER (WHERE ee.action = 'buy'),
+                        AVG(CAST(COALESCE(ee.discount_pct, 0) AS DOUBLE)) FILTER (WHERE ee.action = 'buy'),
                         0.0
                     ), 2) AS avg_discount_pct_on_purchases,
 
                     ROUND(COALESCE(
-                        CAST(COUNT(*) FILTER (WHERE ee.action = 'buy' AND ee.norm_price < ee.prod_avg_price) AS FLOAT) /
+                        CAST(COUNT(*) FILTER (WHERE ee.action = 'buy' AND ee.discount_pct > 0) AS DOUBLE) /
                         NULLIF(COUNT(*) FILTER (WHERE ee.action = 'buy'), 0),
                         0.0
                     ), 4) AS pct_purchases_with_discount,
@@ -211,12 +254,16 @@ def compute_behavioral_features(
                 LEFT JOIN session_stats ss ON ee.user_id = ss.user_id
                 LEFT JOIN session_gap_stats sgs ON ee.user_id = sgs.user_id
                 LEFT JOIN cross_app_counts cac ON ee.user_id = cac.user_id
+                LEFT JOIN informed_stats ist ON ee.user_id = ist.user_id
                 GROUP BY
                     ee.user_id,
                     uat.num_apps_used,
                     ec.app_entropy,
                     ec.dominant_app_share,
                     cac.cross_app_comparison_count,
+                    cac.avg_abs_price_gap_pct,
+                    ist.informed_purchase_count,
+                    ist.chose_cheaper_app_rate,
                     ss.avg_session_duration_minutes,
                     sgs.avg_time_between_sessions_hours
             )

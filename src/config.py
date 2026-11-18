@@ -112,6 +112,13 @@ RECENCY_FEATURES = (
     "days_since_last_cart_add",
 )
 RECENCY_NULL_SENTINEL_DAYS = 9999.0
+
+# Price comparison features. A purchase is "informed" when the same user saw the same
+# product priced on a different app within this many hours before buying.
+CROSS_APP_PRICE_LOOKBACK_HOURS = 24
+# Features whose null means "not measurable" (no informed purchase, no comparison). Zero
+# and 0.5 are real values for them, so model inputs take an out-of-range sentinel instead.
+MISSING_AS_SENTINEL_FEATURES = {"chose_cheaper_app_rate": -1.0, "avg_abs_price_gap_pct": -1.0}
 RANDOM_SEED = 42
 
 # Serving. The API writes live events into its own copy of the warehouse so that demo
