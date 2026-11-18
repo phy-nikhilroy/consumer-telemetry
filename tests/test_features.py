@@ -255,13 +255,13 @@ def test_discount_features_are_not_dead(train):
 
 def test_product_average_price_is_currency_normalized():
     """
-    Verifies dim_products.avg_price agrees with currency-normalized event prices.
+    Verifies prices are normalized to INR before any product average is taken.
 
     This is the root cause behind the dead discount features. The column was once
     computed as a plain AVG(price) over a mix of INR and USD listings, understating
-    every product's true average by 1.6x to 2.0x. Because the behavioral feature layer
-    compares a normalized price against this column, that mismatch silently suppressed
-    the discount signal while every individual value still looked plausible.
+    every product's true average by 1.6x to 2.0x. Since schema v2 every event carries
+    `price_inr`, and `dim_products.avg_price` is the mean INR price over every price
+    observation of the product (focal and context listings), so both are checked.
     """
     db_path = Path("data/processed/consumer.duckdb")
     if not db_path.exists():
@@ -270,27 +270,29 @@ def test_product_average_price_is_currency_normalized():
     from src.config import USD_TO_INR_RATE
 
     with duckdb.connect(str(db_path), read_only=True) as con:
-        rows = con.execute(
+        bad_events = con.execute(
             f"""
-            SELECT
-                p.canonical_product_id,
-                CAST(p.avg_price AS DOUBLE) AS stored_avg,
-                AVG(
-                    CASE WHEN e.currency = 'USD'
-                         THEN e.price * {USD_TO_INR_RATE}
-                         ELSE e.price END
-                ) AS normalized_avg
+            SELECT COUNT(*) FROM fact_events
+            WHERE price IS NOT NULL AND ABS(
+                CAST(price_inr AS DOUBLE)
+                - CASE WHEN currency = 'USD' THEN price * {USD_TO_INR_RATE} ELSE price END
+            ) > 0.01
+            """
+        ).fetchone()[0]
+        rows = con.execute(
+            """
+            SELECT p.canonical_product_id, CAST(p.avg_price AS DOUBLE), AVG(CAST(o.price_inr AS DOUBLE))
             FROM dim_products p
-            JOIN fact_events e USING (canonical_product_id)
+            JOIN fact_price_observations o USING (canonical_product_id)
             GROUP BY 1, 2
             """
         ).fetchall()
 
-    assert rows, "No products joined to events"
-
+    assert bad_events == 0, f"{bad_events} events carry a price_inr that is not the converted price"
+    assert rows, "No products joined to price observations"
     for product_id, stored, normalized in rows:
         assert stored == pytest.approx(normalized, rel=0.01), (
-            f"{product_id}: dim_products.avg_price is {stored:,.0f} but the "
-            f"currency-normalized average is {normalized:,.0f}. The aggregation is "
-            "mixing INR and USD."
+            f"{product_id}: dim_products.avg_price is {stored:,.0f} but the mean INR "
+            f"observation price is {normalized:,.0f}. The aggregation is not over "
+            "normalized prices."
         )
