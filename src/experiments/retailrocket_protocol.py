@@ -120,13 +120,32 @@ def run_cell(cell: Dict[str, Any], features_dir: Path, artifacts_dir: Path) -> D
     return out
 
 
+def ensure_current_schema(db_path: Path) -> str:
+    """
+    Migrates the RetailRocket warehouse in place to the current schema and returns its
+    version. The migration is idempotent; it adds the v2 columns and tables the feature SQL
+    reads (`price_inr`, `discount_pct`, `fact_price_observations`) without touching rows.
+    """
+    from src.features.migrations import migrate
+
+    con = duckdb.connect(str(db_path))
+    try:
+        return migrate(con)
+    finally:
+        con.close()
+
+
 def run_grid(
     db_path: Path = RR_DB_PATH,
     out_dir: Path = RR_OUT_DIR,
     train_refs: Sequence[str] = RR_TRAIN_REFS,
     test_ref: str = RR_TEST_REF,
 ) -> Dict[str, Any]:
-    """Verifies the data range, validates the split, builds features once, runs all cells."""
+    """
+    Upgrades the warehouse to the current schema, verifies the data range, validates the
+    split, builds features once, and runs all cells.
+    """
+    ensure_current_schema(db_path)
     con = duckdb.connect(str(db_path), read_only=True)
     try:
         lo, hi = con.execute("SELECT MIN(timestamp), MAX(timestamp) FROM fact_events").fetchone()

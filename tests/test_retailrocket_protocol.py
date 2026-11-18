@@ -43,3 +43,25 @@ def test_fit_cell_spw_modes(spw):
     m = rr.fit_cell(X, y, g, spw, "average_precision", 20)
     expected = 1.0 if spw == "one" else (y == 0).sum() / (y == 1).sum()
     assert m.get_params()["scale_pos_weight"] == pytest.approx(expected)
+
+
+def test_ensure_current_schema_upgrades_a_v1_warehouse(tmp_path):
+    """A v1 warehouse gains the v2 columns the feature SQL reads, and keeps its rows."""
+    from pathlib import Path
+
+    import duckdb
+
+    db = tmp_path / "rr.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute((Path(__file__).parent / "fixtures" / "schema_v1.sql").read_text(encoding="utf-8"))
+    con.execute("INSERT INTO fact_events (event_id, user_id, timestamp, app_name, canonical_product_id, action, "
+                "price, currency, session_id) VALUES ('e1', 'u1', '2015-08-01', 'rr', 'p1', 'view', 10.0, 'INR', 's1')")
+    con.close()
+    assert rr.ensure_current_schema(db) == "2"
+    assert rr.ensure_current_schema(db) == "2"
+    con = duckdb.connect(str(db), read_only=True)
+    try:
+        assert con.execute("SELECT price_inr FROM fact_events").fetchone()[0] == 10
+        assert con.execute("SELECT COUNT(*) FROM fact_price_observations").fetchone()[0] == 0
+    finally:
+        con.close()
