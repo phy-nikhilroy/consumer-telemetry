@@ -260,19 +260,178 @@ def retailrocket_grid_concluded() -> Tuple[bool, str]:
     return len(cells) == 8 and bool(conclusion), f"{len(cells)} grid cells, conclusion {'set' if conclusion else 'empty'}"
 
 
+_SUITE_CACHE: Dict[str, Tuple[int, int, str]] = {}
+
+
+def _suite_result() -> Tuple[int, int, str]:
+    """
+    Collected test count, pytest exit code, and summary line of one full suite run. The run
+    is shared by every gate in the process, so `--version all` runs the suite once.
+    """
+    if "run" not in _SUITE_CACHE:
+        pytest_bin = str(_ROOT / ".venv" / "bin" / "pytest")
+        args = [pytest_bin, "-q", "-p", "no:cacheprovider"]
+        collected = subprocess.run(args + ["--collect-only"], cwd=_ROOT, capture_output=True, text=True)
+        match = re.search(r"(\d+) tests? collected", collected.stdout)
+        count = int(match.group(1)) if match else 0
+        run = subprocess.run(args, cwd=_ROOT, capture_output=True, text=True)
+        summary = run.stdout.strip().splitlines()[-1] if run.stdout.strip() else "no output"
+        _SUITE_CACHE["run"] = (count, run.returncode, summary)
+    return _SUITE_CACHE["run"]
+
+
 @gate("1.1", "G1.1-13", "H")
 def suite_passes_with_enough_tests() -> Tuple[bool, str]:
     """At least 300 tests are collected and the full suite passes."""
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return False, "not run inside pytest (it would run the suite recursively)"
+    count, code, summary = _suite_result()
+    return count >= 300 and code == 0, f"{count} tests collected; {summary}"
+
+
+# ---------------------------------------------------------------------------------------
+# v1.2: extraction measured on unseen data
+# ---------------------------------------------------------------------------------------
+
+def _get(data: Dict[str, Any], dotted: str) -> Any:
+    """Reads a dotted key path from nested dicts; raises KeyError naming the missing path."""
+    value: Any = data
+    for part in dotted.split("."):
+        if not isinstance(value, dict) or part not in value:
+            raise KeyError(dotted)
+        value = value[part]
+    return value
+
+
+def _run_pytest(*node_ids: str) -> Tuple[bool, str]:
+    """Runs the named tests in a subprocess; returns (passed, summary line)."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False, "not run inside pytest"
     pytest_bin = str(_ROOT / ".venv" / "bin" / "pytest")
-    args = [pytest_bin, "-q", "-p", "no:cacheprovider"]
-    collected = subprocess.run(args + ["--collect-only"], cwd=_ROOT, capture_output=True, text=True)
-    match = re.search(r"(\d+) tests? collected", collected.stdout)
-    count = int(match.group(1)) if match else 0
-    run = subprocess.run(args, cwd=_ROOT, capture_output=True, text=True)
+    run = subprocess.run([pytest_bin, "-q", "-p", "no:cacheprovider", *node_ids], cwd=_ROOT,
+                         capture_output=True, text=True)
     summary = run.stdout.strip().splitlines()[-1] if run.stdout.strip() else "no output"
-    return count >= 300 and run.returncode == 0, f"{count} tests collected; {summary}"
+    return run.returncode == 0, summary
+
+
+@gate("1.2", "G1.2-01", "H")
+def extraction_artifacts_load() -> Tuple[bool, str]:
+    """Both committed extraction artifacts exist and load."""
+    import joblib
+
+    from src.config import CONFIDENCE_ARTIFACT_PATH, TAXONOMY_ARTIFACT_PATH
+
+    taxonomy = joblib.load(TAXONOMY_ARTIFACT_PATH)
+    confidence = joblib.load(CONFIDENCE_ARTIFACT_PATH)
+    ok = {"model", "labels", "tau"} <= set(taxonomy) and "model" in confidence
+    return ok, f"taxonomy {len(taxonomy['labels'])} labels tau {taxonomy['tau']}; confidence loaded"
+
+
+@gate("1.2", "G1.2-02", "H")
+def extraction_report_complete() -> Tuple[bool, str]:
+    """The extraction report has the tune, held-out, and gap blocks, synthetic, and throughput."""
+    results = _report("v1_2_extraction")
+    needed = ["real.tune", f"real.{_HELD_OUT}", "real.gap", "synthetic", "throughput"]
+    missing = []
+    for path in needed:
+        try:
+            _get(results, path)
+        except KeyError:
+            missing.append(path)
+    return not missing, f"missing {missing or 'none'}"
+
+
+# The held-out split's name comes from real_splits, the one module (with the benchmark)
+# allowed to spell it; gate G1.2-10 checks that no other module does.
+from src.ingestion.real_splits import SPLITS as _SPLITS  # noqa: E402
+
+_HELD_OUT = _SPLITS[2]
+HELD_OUT_CATEGORY_ACCURACY_KEY = f"real.{_HELD_OUT}.category_accuracy_non_abstained"
+HELD_OUT_ABSTAIN_RATE_KEY = f"real.{_HELD_OUT}.abstain_rate"
+
+
+@gate("1.2", "G1.2-03", "T")
+def held_out_taxonomy_accuracy_and_abstention() -> Tuple[bool, str]:
+    """Held-out taxonomy accuracy among non-abstained rows >= 0.80 and abstain rate <= 0.50."""
+    results = _report("v1_2_extraction")
+    accuracy = float(_get(results, HELD_OUT_CATEGORY_ACCURACY_KEY))
+    abstain = float(_get(results, HELD_OUT_ABSTAIN_RATE_KEY))
+    return accuracy >= 0.80 and abstain <= 0.50, f"accuracy {accuracy:.4f} (>= 0.80), abstain {abstain:.4f} (<= 0.50)"
+
+
+# results.synthetic.by_noise is keyed by the noise rate as text ("0.00"), so it is read
+# directly rather than through a dotted path.
+SYNTHETIC_NOISE0_FLOORS = {"price_accuracy": 0.99, "brand_accuracy": 0.95, "segmentation_accuracy": 0.95}
+
+
+@gate("1.2", "G1.2-04", "T")
+def synthetic_accuracy_at_zero_noise() -> Tuple[bool, str]:
+    """At OCR noise 0.0: price >= 0.99, brand >= 0.95, segmentation >= 0.95."""
+    by_noise = _get(_report("v1_2_extraction"), "synthetic.by_noise")
+    zero = by_noise["0.00"]
+    parts, ok = [], True
+    for key, floor in SYNTHETIC_NOISE0_FLOORS.items():
+        value = float(zero[key])
+        ok = ok and value >= floor
+        parts.append(f"{key} {value:.4f} (>= {floor})")
+    return ok, ", ".join(parts)
+
+
+@gate("1.2", "G1.2-05", "T")
+def matcher_f1_and_hard_negatives() -> Tuple[bool, str]:
+    """Matcher on test pairs: F1 >= 0.90 and hard-negative false-match rate <= 0.05."""
+    matcher = _report("v1_2_entity_resolution")["test"]["matcher"]
+    f1, fmr = float(matcher["f1"]), float(matcher["hard_negative_false_match_rate"])
+    return f1 >= 0.90 and fmr <= 0.05, f"F1 {f1:.4f} (>= 0.90), hard false-match {fmr:.4f} (<= 0.05)"
+
+
+@gate("1.2", "G1.2-06", "H")
+def matcher_recall_beats_exact_key() -> Tuple[bool, str]:
+    """The v1.0 exact key's recall is reported and the matcher's recall is higher."""
+    test = _report("v1_2_entity_resolution")["test"]
+    exact, matcher = float(test["v1_exact_key"]["recall"]), float(test["matcher"]["recall"])
+    return matcher > exact, f"matcher recall {matcher:.4f} vs exact key {exact:.4f}"
+
+
+@gate("1.2", "G1.2-07", "T")
+def learned_confidence_is_calibrated() -> Tuple[bool, str]:
+    """Learned confidence on tune: ECE <= 0.08 and AUC >= the hand-weighted AUC."""
+    tune = _get(_report("v1_2_extraction"), "confidence.tune")
+    ece = float(tune["learned"]["ece"])
+    auc, hand_auc = float(tune["learned"]["auc"]), float(tune["hand_weighted"]["auc"])
+    return ece <= 0.08 and auc >= hand_auc, f"ECE {ece:.4f} (<= 0.08), AUC {auc:.4f} vs hand {hand_auc:.4f}"
+
+
+@gate("1.2", "G1.2-08", "T")
+def batch_throughput() -> Tuple[bool, str]:
+    """process_batch reaches at least 250 events per second on this machine."""
+    rate = float(_get(_report("v1_2_extraction"), "throughput.process_batch_events_per_s"))
+    return rate >= 250.0, f"{rate:.1f} events per second (>= 250)"
+
+
+@gate("1.2", "G1.2-09", "H")
+def batch_equals_process_and_catalog_classified() -> Tuple[bool, str]:
+    """process_batch equals process, and no catalog product is Unknown (the two tests pass)."""
+    return _run_pytest(
+        "tests/test_process_batch.py::test_process_batch_equals_process_on_200_listings",
+        "tests/test_pipeline.py::test_catalog_products_keep_brand_and_category",
+        "tests/test_pipeline.py::test_catalog_categories_are_structurally_consistent",
+    )
+
+
+@gate("1.2", "G1.2-10", "H")
+def held_out_split_named_only_by_benchmark() -> Tuple[bool, str]:
+    """The held-out split's name appears in no module except real_splits.py and real_data_benchmark.py."""
+    return _run_pytest(f"tests/test_real_splits.py::test_only_the_benchmark_reads_{_HELD_OUT}")
+
+
+@gate("1.2", "G1.2-11", "H")
+def suite_passes_with_350_tests() -> Tuple[bool, str]:
+    """At least 350 tests are collected and the full suite passes."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False, "not run inside pytest (it would run the suite recursively)"
+    count, code, summary = _suite_result()
+    return count >= 350 and code == 0, f"{count} tests collected; {summary}"
 
 
 def run_gates(version: str) -> List[GateResult]:
