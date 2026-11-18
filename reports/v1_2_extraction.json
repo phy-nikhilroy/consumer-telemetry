@@ -1,16 +1,122 @@
 {
   "schema_version": 1,
   "release": "1.2",
-  "generated_at": "2026-11-17T23:10:54+00:00",
-  "git_commit": "af83949",
+  "generated_at": "2026-11-18T00:18:55+00:00",
+  "git_commit": "c6c0062",
   "seed": 42,
   "results": {
     "throughput": {
       "n_events": 5000,
       "batch_size": 256,
-      "process_events_per_s": 164.9,
-      "process_batch_events_per_s": 551.8,
-      "speedup": 3.35
+      "process_events_per_s": 151.3,
+      "process_batch_events_per_s": 443.6,
+      "speedup": 2.93
+    },
+    "real": {
+      "tune": {
+        "n": 5000,
+        "category_n": 4861,
+        "brand_accuracy": 0.63,
+        "brand_confidently_wrong_rate": 0.1876,
+        "price_accuracy": 0.998,
+        "rating_accuracy": 1.0,
+        "category_accuracy_non_abstained": 0.9154200230149597,
+        "abstain_rate": 0.2849207981896729,
+        "final_category_accuracy": 0.6548035383665912,
+        "shards": [
+          "meta_shard0"
+        ]
+      },
+      "heldout": {
+        "n": 15000,
+        "category_n": 14513,
+        "brand_accuracy": 0.5972666666666666,
+        "brand_confidently_wrong_rate": 0.2468,
+        "price_accuracy": 0.9944666666666667,
+        "rating_accuracy": 1.0,
+        "category_accuracy_non_abstained": 0.8935759300670868,
+        "abstain_rate": 0.3221249913870323,
+        "final_category_accuracy": 0.6642320678012816,
+        "shards": [
+          "meta_cell_shard1",
+          "meta_electronics_shard0",
+          "meta_fashion_shard0"
+        ]
+      },
+      "gap": {
+        "brand_accuracy": 0.03273333333333339,
+        "brand_confidently_wrong_rate": -0.0592,
+        "price_accuracy": 0.0035333333333332773,
+        "rating_accuracy": 0.0,
+        "category_accuracy_non_abstained": 0.02184409294787293,
+        "abstain_rate": -0.0372041931973594,
+        "final_category_accuracy": -0.009428529434690414
+      }
+    },
+    "synthetic": {
+      "n_screens": 2000,
+      "by_noise": {
+        "0.00": {
+          "noise_rate": 0.0,
+          "n_listings": 4083,
+          "price_accuracy": 1.0,
+          "brand_accuracy": 0.9701200097967181,
+          "segment_count_accuracy": 1.0,
+          "segmentation_accuracy": 1.0
+        },
+        "0.01": {
+          "noise_rate": 0.01,
+          "n_listings": 4083,
+          "price_accuracy": 0.9823659074210139,
+          "brand_accuracy": 0.9578741121724222,
+          "segment_count_accuracy": 1.0,
+          "segmentation_accuracy": 0.964
+        },
+        "0.02": {
+          "noise_rate": 0.02,
+          "n_listings": 4083,
+          "price_accuracy": 0.9679157482243449,
+          "brand_accuracy": 0.9478324761204996,
+          "segment_count_accuracy": 1.0,
+          "segmentation_accuracy": 0.935
+        },
+        "0.05": {
+          "noise_rate": 0.05,
+          "n_listings": 4083,
+          "price_accuracy": 0.9061964241978937,
+          "brand_accuracy": 0.9123193730100416,
+          "segment_count_accuracy": 1.0,
+          "segmentation_accuracy": 0.8205
+        }
+      }
+    },
+    "confidence": {
+      "tune": {
+        "split": "tune",
+        "n": 3000,
+        "positive_rate": 0.394,
+        "learned": {
+          "ece": 0.04367966701567967,
+          "auc": 0.8337207451709637
+        },
+        "hand_weighted": {
+          "ece": 0.4082770333333333,
+          "auc": 0.8089940973792811
+        }
+      },
+      "heldout": {
+        "split": "heldout",
+        "n": 3000,
+        "positive_rate": 0.39666666666666667,
+        "learned": {
+          "ece": 0.03715948799294677,
+          "auc": 0.8218821672315335
+        },
+        "hand_weighted": {
+          "ece": 0.40633339999999996,
+          "auc": 0.8112328798922883
+        }
+      }
     }
   },
   "tripwire_notes": []

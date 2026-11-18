@@ -41,11 +41,11 @@ from src.ingestion.ner_extractor import (
     reset_registered_brands,
 )
 from src.ingestion.regex_extractor import extract_price, extract_rating
-from src.ingestion.pipeline import process
+from src.ingestion.pipeline import process  # noqa: E402
 
 EXTERNAL_DIR = DATA_DIR / "external"
 AMAZON_META_PATH = EXTERNAL_DIR / "amazon_meta" / "meta_shard0.parquet"
-BENCHMARK_REPORT_PATH = DATA_DIR / "external" / "week1_real_data_benchmark.json"
+BENCHMARK_REPORT_PATH = None  # the report is written to reports/v1_2_extraction.json by merge_results
 
 # Amazon's metadata stores a missing price as the four-character string "None" inside a
 # string column, not as a null. A null check reports full coverage and a naive cast
@@ -492,46 +492,230 @@ def print_report(fields: Dict[str, Any], pipeline: Dict[str, Any]) -> None:
         print(f"    {count:>5} ({count / max(1, pipeline['n']):>5.1%})  {label}")
 
 
-def run_benchmark(
-    field_sample: int = 5000,
-    pipeline_sample: int = 600,
-    n_rows: Optional[int] = 200_000,
-    report_path: Optional[Union[str, Path]] = None,
-) -> Dict[str, Any]:
-    """Loads real metadata, runs both benchmarks, prints and saves the report."""
-    print(f"Loading real Amazon product metadata from {AMAZON_META_PATH}...")
-    df = load_amazon_metadata(n_rows=n_rows)
-    print(f"  {df.height:,} products with a title, a parseable price, and a rating")
+REPORT_NAME = "v1_2_extraction"
+RELEASE = "1.2"
+HELDOUT_ROWS_PER_SHARD = 5000
+TUNE_ROWS = 5000
+SYNTHETIC_SCREENS = 2000
+SYNTHETIC_NOISE_RATES = (0.0, 0.01, 0.02, 0.05)
+SPLIT_METRICS = (
+    "brand_accuracy", "brand_confidently_wrong_rate", "price_accuracy", "rating_accuracy",
+    "category_accuracy_non_abstained", "abstain_rate",
+)
 
-    fields = benchmark_field_extraction(df, sample_size=field_sample)
-    pipeline = benchmark_full_pipeline(df, sample_size=pipeline_sample)
-    print_report(fields, pipeline)
 
-    payload = {
-        "source": "McAuley-Lab/Amazon-Reviews-2023 raw_meta_Cell_Phones_and_Accessories",
-        "usable_products": df.height,
-        "field_extraction": fields,
-        "full_pipeline": pipeline,
+def score_rows(df: pl.DataFrame, seed: int = RANDOM_SEED, batch_size: int = 256) -> Dict[str, Any]:
+    """
+    Scores one set of prepared rows (see `confidence_model.prepare_rows`) with `process_batch`.
+
+    Brand, price and rating accuracy are over all rows. The confidently-wrong brand rate is the
+    share of rows given a brand that is wrong. Category accuracy and the abstain rate score the
+    supervised model alone (`model_abstained`, `model_label` against the product-type label) on
+    rows that have a product-type label; `final_category_accuracy` scores the pipeline's category
+    including the prototype fallback on the same rows.
+    """
+    from src.ingestion.pipeline import process_batch
+    from src.ingestion.pipeline import taxonomy_text
+    from src.ingestion.taxonomy_classifier import classify_product
+
+    rng = random.Random(seed)
+    rows = list(df.iter_rows(named=True))
+    texts = [render_screen_text(r, rng) for r in rows]
+    products = process_batch(texts, app_sources=["amazon_us"] * len(texts), batch_size=batch_size)
+    n = len(rows)
+    brand_ok = brand_wrong = price_ok = rating_ok = 0
+    cat_n = cat_abstain = cat_correct = final_correct = 0
+    for row, p in zip(rows, products):
+        true_brand = (row["true_brand"] or "").strip().lower()
+        if p.brand:
+            if true_brand and p.brand.strip().lower() == true_brand:
+                brand_ok += 1
+            else:
+                brand_wrong += 1
+        if p.price is not None and abs(float(p.price) - float(row["true_price"])) < 0.01:
+            price_ok += 1
+        if p.rating is not None and abs(float(p.rating) - float(row["true_rating"])) < 0.051:
+            rating_ok += 1
+        label = row.get("true_label")
+        if not label:
+            continue
+        cat_n += 1
+        info = classify_product(p.product_title or "", brand=p.brand,
+                                model_text=taxonomy_text(p.raw_text, p.product_title))
+        if info.get("model_abstained", True):
+            cat_abstain += 1
+        elif info.get("model_label") == label:
+            cat_correct += 1
+        if f"{p.category_l1} > {p.category_l2}" == label:
+            final_correct += 1
+    answered = cat_n - cat_abstain
+    return {
+        "n": n,
+        "category_n": cat_n,
+        "brand_accuracy": brand_ok / max(1, n),
+        "brand_confidently_wrong_rate": brand_wrong / max(1, n),
+        "price_accuracy": price_ok / max(1, n),
+        "rating_accuracy": rating_ok / max(1, n),
+        "category_accuracy_non_abstained": cat_correct / answered if answered else None,
+        "abstain_rate": cat_abstain / cat_n if cat_n else None,
+        "final_category_accuracy": final_correct / cat_n if cat_n else None,
     }
-    out = Path(report_path) if report_path else BENCHMARK_REPORT_PATH
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
-    print(f"\nSaved benchmark report to {out}")
-    return payload
+
+
+def load_scored_split(split: str, shards: List[str], rows_per_shard: int, seed: int = RANDOM_SEED) -> pl.DataFrame:
+    """Loads `split` from each shard, prepares it, and samples at most `rows_per_shard` per shard."""
+    from src.ingestion.confidence_model import prepare_rows
+    from src.ingestion.real_splits import load_split
+
+    frames = []
+    for shard in shards:
+        prepared = prepare_rows(load_split(split, [shard]))
+        if prepared.height > rows_per_shard:
+            prepared = prepared.sample(n=rows_per_shard, seed=seed)
+        frames.append(prepared)
+    return pl.concat(frames, how="diagonal_relaxed")
+
+
+def split_gap(tune: Dict[str, Any], heldout: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    """Tune minus heldout for each metric in `SPLIT_METRICS` (None when either side is None)."""
+    out: Dict[str, Optional[float]] = {}
+    for key in SPLIT_METRICS + ("final_category_accuracy",):
+        a, b = tune.get(key), heldout.get(key)
+        out[key] = None if a is None or b is None else a - b
+    return out
+
+
+def run_real(splits: Tuple[str, ...] = ("tune", "heldout"), shards: Optional[List[str]] = None,
+             seed: int = RANDOM_SEED) -> Dict[str, Any]:
+    """
+    Scores the tune split (shard0) and/or the held-out split (the other shards).
+
+    `shards`, when given, restricts the held-out shards; tune always uses the tuned shard.
+    """
+    from src.config import AMAZON_SHARDS, AMAZON_TUNED_SHARD
+
+    held_shards = shards or [k for k in AMAZON_SHARDS if k != AMAZON_TUNED_SHARD]
+    out: Dict[str, Any] = {}
+    if "tune" in splits:
+        out["tune"] = score_rows(load_scored_split("tune", [AMAZON_TUNED_SHARD], TUNE_ROWS, seed), seed)
+        out["tune"]["shards"] = [AMAZON_TUNED_SHARD]
+    if "heldout" in splits:
+        out["heldout"] = score_rows(load_scored_split("heldout", held_shards, HELDOUT_ROWS_PER_SHARD, seed), seed)
+        out["heldout"]["shards"] = held_shards
+    if "tune" in out and "heldout" in out:
+        out["gap"] = split_gap(out["tune"], out["heldout"])
+    return out
+
+
+def _synthetic_screen(catalog: List[dict], rng: random.Random) -> Tuple[str, List[Tuple[str, float]]]:
+    """Builds one clean screen of 1 to 3 listings; returns its text and the true (brand, price) pairs."""
+    from src.ingestion.screen_generator import INR_APPS, render_listing, render_screen
+    from src.ingestion.synthetic_data import ACTION_SNIPPETS
+
+    apps = sorted(ACTION_SNIPPETS)
+    listings, truth = [], []
+    for _ in range(rng.randint(1, 3)):
+        item = catalog[rng.randrange(len(catalog))]
+        app = apps[rng.randrange(len(apps))]
+        action = rng.choice([a for a in ("view", "cart", "buy") if a in ACTION_SNIPPETS[app]])
+        inr = app in INR_APPS
+        base = float(item["base_inr"] if inr else item["base_usd"])
+        price = base * rng.uniform(0.90, 1.10)
+        price = float(int(round(price))) if inr else round(price, 2)
+        listings.append(render_listing(item, app, action, rng.choice([0, 10, 25]), round(rng.uniform(3, 5), 1), rng, price=price))
+        truth.append((item["brand"], price))
+    return render_screen(listings, rng), truth
+
+
+def run_synthetic(n_screens: int = SYNTHETIC_SCREENS, rates: Tuple[float, ...] = SYNTHETIC_NOISE_RATES,
+                  seed: int = RANDOM_SEED) -> Dict[str, Any]:
+    """
+    Robustness of the screen chain to OCR noise on catalog screens.
+
+    The same clean screens are noised at each rate. `field_accuracy` is over every true
+    listing (a listing counts only when the screen was segmented into the right number of
+    segments and the field at its position is right). `segmentation_accuracy` is the share of
+    screens with the right segment count and the right price in each segment.
+    """
+    from src.ingestion.catalog import build_catalog
+    from src.ingestion.pipeline import process_screen
+    from src.ingestion.screen_generator import apply_ocr_noise
+
+    catalog = build_catalog()
+    rng = random.Random(seed)
+    screens = [_synthetic_screen(catalog, rng) for _ in range(n_screens)]
+    out: Dict[str, Any] = {"n_screens": n_screens, "by_noise": {}}
+    for rate in rates:
+        noise_rng = random.Random(seed + int(rate * 1000))
+        listings = price_ok = brand_ok = count_ok = seg_ok = 0
+        for text, truth in screens:
+            products = process_screen(apply_ocr_noise(text, rate, noise_rng), app_source="synthetic")
+            listings += len(truth)
+            right_count = len(products) == len(truth)
+            count_ok += int(right_count)
+            if not right_count:
+                continue
+            prices = [p.price is not None and abs(float(p.price) - t[1]) < 0.01 for p, t in zip(products, truth)]
+            price_ok += sum(prices)
+            brand_ok += sum(bool(p.brand) and p.brand.lower() == t[0].lower() for p, t in zip(products, truth))
+            seg_ok += int(all(prices))
+        out["by_noise"][f"{rate:.2f}"] = {
+            "noise_rate": rate,
+            "n_listings": listings,
+            "price_accuracy": price_ok / max(1, listings),
+            "brand_accuracy": brand_ok / max(1, listings),
+            "segment_count_accuracy": count_ok / max(1, n_screens),
+            "segmentation_accuracy": seg_ok / max(1, n_screens),
+        }
+    return out
+
+
+def merge_results(updates: Dict[str, Any], output: Optional[Union[str, Path]] = None,
+                  seed: int = RANDOM_SEED) -> Path:
+    """
+    Merges `updates` (top-level keys of `results`) into the report, keeping every other key,
+    and writes it with the standard envelope. `output` defaults to `reports/v1_2_extraction.json`.
+    """
+    from src.config import REPORTS_DIR
+    from src.release import reporting
+
+    path = Path(output) if output else REPORTS_DIR / f"{REPORT_NAME}.json"
+    results: Dict[str, Any] = {}
+    if path.exists():
+        results = dict(json.loads(path.read_text()).get("results", {}))
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(results.get(key), dict):
+            results[key] = {**results[key], **value}
+        else:
+            results[key] = value
+    original = reporting.REPORTS_DIR
+    reporting.REPORTS_DIR = path.parent
+    try:
+        return reporting.write_report(path.stem, RELEASE, results, seed=seed)
+    finally:
+        reporting.REPORTS_DIR = original
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    """CLI entry point: runs the real and synthetic benchmarks and merges them into the report."""
+    parser = argparse.ArgumentParser(description="Held-out benchmark of the extraction chain.")
+    parser.add_argument("--split", choices=("tune", "heldout"), default=None,
+                        help="Score only this real split (default both)")
+    parser.add_argument("--shards", nargs="+", default=None, help="Held-out shard keys")
+    parser.add_argument("--output", default=None, help="Report path (default reports/v1_2_extraction.json)")
+    parser.add_argument("--skip-synthetic", action="store_true")
+    parser.add_argument("--skip-confidence", action="store_true")
+    args = parser.parse_args(argv)
+
+    splits = (args.split,) if args.split else ("tune", "heldout")
+    updates: Dict[str, Any] = {"real": run_real(splits, args.shards)}
+    if not args.skip_synthetic:
+        updates["synthetic"] = run_synthetic()
+    if not args.skip_confidence and not args.split:
+        updates["confidence"] = evaluate_learned_confidence()
+    print(json.dumps(updates, indent=2, default=str))
+    print(merge_results(updates, args.output))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Benchmark the upstream extraction chain on real Amazon product data."
-    )
-    parser.add_argument("--field-sample", type=int, default=5000)
-    parser.add_argument("--pipeline-sample", type=int, default=600)
-    parser.add_argument("--rows", type=int, default=200_000, help="Metadata rows to scan")
-    args = parser.parse_args()
-
-    run_benchmark(
-        field_sample=args.field_sample,
-        pipeline_sample=args.pipeline_sample,
-        n_rows=args.rows,
-    )
+    main()
