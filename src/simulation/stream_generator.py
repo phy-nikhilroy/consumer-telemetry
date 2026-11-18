@@ -35,12 +35,15 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import httpx
 
-from src.ingestion.synthetic_data import CATALOG, generate_app_screen_text
+from src.ingestion.catalog import build_catalog
+from src.ingestion.synthetic_data import generate_app_screen_text
 
 DEFAULT_API_URL = os.environ.get("CT_API_URL", "http://localhost:8000")
 APPS = ["amazon_in", "flipkart", "walmart", "amazon_us"]
 ACTION_WEIGHTS = {"view": 0.72, "cart": 0.18, "buy": 0.10}
 DISCOUNTS = [0, 0, 10, 15, 20, 35, 45]
+# The v1.2 family catalog (303 SKUs), the same products the behaviour engine simulates.
+STREAM_CATALOG: List[dict] = build_catalog()
 
 
 def fetch_user_pool(client: httpx.Client, limit: int = 1000) -> List[str]:
@@ -68,7 +71,7 @@ def build_event(
     else:
         user_id = rng.choice(user_pool)
 
-    item = rng.choice(CATALOG)
+    item = rng.choice(STREAM_CATALOG)
     app = rng.choice(APPS)
     action = rng.choices(list(ACTION_WEIGHTS), weights=list(ACTION_WEIGHTS.values()))[0]
     discount = rng.choice(DISCOUNTS)

@@ -336,7 +336,11 @@ def _build_warehouse(path: Path, start: datetime, end: datetime) -> Path:
 @pytest.fixture(scope="module")
 def e1_db(tmp_path_factory) -> Path:
     path = tmp_path_factory.mktemp("e1") / "w.duckdb"
-    return _build_warehouse(path, datetime(2026, 9, 22), datetime(2026, 10, 28, 12))
+    # Spans the configured split: three weeks of history before the first train date, and data
+    # until half a day after the test target window ends.
+    first = datetime.fromisoformat(min(TRAIN_REFERENCE_DATES)) - timedelta(days=20)
+    last = datetime.fromisoformat(TEST_REFERENCE_DATE) + timedelta(days=PREDICTION_WINDOW_DAYS, hours=12)
+    return _build_warehouse(path, first, last)
 
 
 def test_validate_split_rejects_overlapping_windows():
@@ -373,8 +377,11 @@ def test_config_split_is_valid():
 
 def test_config_constants_have_spec_values():
     assert PREDICTION_WINDOW_DAYS == 7
-    assert tuple(TRAIN_REFERENCE_DATES) == ("2026-10-06 00:00:00", "2026-10-13 00:00:00")
-    assert TEST_REFERENCE_DATE == "2026-10-20 00:00:00"
+    # v1.4 split on the 60-day simulation (plan section S2).
+    assert tuple(TRAIN_REFERENCE_DATES) == (
+        "2026-10-12 00:00:00", "2026-10-19 00:00:00", "2026-10-26 00:00:00",
+        "2026-11-02 00:00:00", "2026-11-09 00:00:00")
+    assert TEST_REFERENCE_DATE == "2026-11-16 00:00:00"
 
 
 def test_validate_split_rejects_empty_train_refs():
@@ -578,3 +585,58 @@ def test_get_modeling_matrices_uses_per_target_list(tmp_path):
         target_col="will_switch_app_next_7d", features_path=tmp_path / "m.parquet",
         selected_features_path=sel)
     assert names == ["b"]
+
+
+# --------------------------------------------------------------------------- split_for_window
+
+
+def test_split_for_window_returns_config_split_when_it_fits():
+    from src.features.feature_store import split_for_window
+
+    end = datetime.fromisoformat(TEST_REFERENCE_DATE) + timedelta(days=PREDICTION_WINDOW_DAYS)
+    train, test = split_for_window(end, datetime(2026, 9, 28, 8))
+    assert train == list(TRAIN_REFERENCE_DATES)
+    assert test == TEST_REFERENCE_DATE
+
+
+def test_split_for_window_moves_back_whole_weeks_for_a_short_run():
+    from src.features.feature_store import split_for_window
+
+    # A 30-day run from the simulation start ends on 2026-10-28.
+    train, test = split_for_window(datetime(2026, 10, 27, 22), datetime(2026, 9, 28, 8))
+    assert test == "2026-10-19 00:00:00"
+    assert train == ["2026-10-05 00:00:00", "2026-10-12 00:00:00"]
+    for ref in train + [test]:
+        delta = datetime.fromisoformat(TEST_REFERENCE_DATE) - datetime.fromisoformat(ref)
+        assert delta.days % 7 == 0 and delta.seconds == 0
+    _validate_split()(train, test, max_event_timestamp=datetime(2026, 10, 27, 22))
+
+
+def test_split_for_window_45_day_run():
+    from src.features.feature_store import split_for_window
+
+    train, test = split_for_window(datetime(2026, 11, 12, 7), datetime(2026, 9, 28, 8))
+    assert test == "2026-11-02 00:00:00"
+    assert train == ["2026-10-05 00:00:00", "2026-10-12 00:00:00", "2026-10-19 00:00:00", "2026-10-26 00:00:00"]
+
+
+def test_split_for_window_caps_train_dates_at_config_count():
+    from src.features.feature_store import split_for_window
+
+    end = datetime.fromisoformat(TEST_REFERENCE_DATE) + timedelta(days=PREDICTION_WINDOW_DAYS)
+    train, _ = split_for_window(end, datetime(2026, 1, 1))
+    assert len(train) == len(TRAIN_REFERENCE_DATES)
+
+
+def test_split_for_window_rejects_too_little_data():
+    from src.features.feature_store import split_for_window
+
+    with pytest.raises(ValueError):
+        split_for_window(datetime(2026, 10, 10), datetime(2026, 9, 28, 8))
+
+
+def test_split_for_warehouse_reads_event_range(e1_db):
+    from src.features.feature_store import split_for_warehouse
+
+    train, test = split_for_warehouse(e1_db)
+    assert test == TEST_REFERENCE_DATE and train == list(TRAIN_REFERENCE_DATES)

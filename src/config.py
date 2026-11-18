@@ -60,15 +60,21 @@ DEFAULT_CROSS_APP_WINDOW_MINUTES = 60.0
 # Temporal split. Every train target window (ref, ref + window] must end at or before the
 # test reference date, so no train label ever observes an event the test labels observe.
 PREDICTION_WINDOW_DAYS = 7
-TRAIN_REFERENCE_DATES = ("2026-10-06 00:00:00", "2026-10-13 00:00:00")
-TEST_REFERENCE_DATE = "2026-10-20 00:00:00"
+# Five weekly train dates on the 60-day simulation (v1.4); the last train window ends on the
+# test reference date.
+TRAIN_REFERENCE_DATES = ("2026-10-12 00:00:00", "2026-10-19 00:00:00", "2026-10-26 00:00:00",
+                         "2026-11-02 00:00:00", "2026-11-09 00:00:00")
+TEST_REFERENCE_DATE = "2026-11-16 00:00:00"
 
 # CLV validation. The holdout fits BG/NBD and Gamma-Gamma on purchases up to the
 # calibration end and scores the following holdout window. Shrinkage pulls a user's
 # observed mean order value toward the global mean with the weight of K pseudo-orders.
 CLV_ORDER_VALUE_SHRINKAGE_K = 3.0
-CLV_HOLDOUT_CALIBRATION_END = "2026-10-18 00:00:00"
-CLV_HOLDOUT_DAYS = 9
+CLV_CALIBRATION_END = "2026-11-02 00:00:00"
+CLV_HOLDOUT_DAYS = 21
+# The spend regressor trains at CLV_REGRESSOR_TRAIN_REF against the next CLV_HOLDOUT_DAYS and is
+# tested at CLV_CALIBRATION_END against the holdout window, so its windows never overlap.
+CLV_REGRESSOR_TRAIN_REF = "2026-10-12 00:00:00"
 
 # Model artifacts
 MODELS_DIR = PROJECT_ROOT / "src" / "models"
@@ -223,3 +229,18 @@ SIMULATION_TRUTH_PATH = PROCESSED_DATA_DIR / "simulation_truth.parquet"
 SIMULATION_MAX_CONTEXT_LISTINGS = 3
 # Extraction processes a simulation load uses. The tables are identical for any value.
 SIMULATION_LOAD_WORKERS = 4
+
+
+# Behaviour engine (src/simulation/behavior.py, v1.4). The default population and window,
+# the apps every shopper can use, and the price coefficient of the purchase-app logit
+# U(app) = loyalty_u * [app == primary_app] - PRICE_BETA * sensitivity_u * log(price_inr(app)).
+SIMULATION_USERS = 1000
+SIMULATION_DAYS = 60
+SIMULATION_START = "2026-09-28 08:00:00"
+SIMULATION_APPS = ("amazon_in", "flipkart", "walmart", "amazon_us")
+PRICE_BETA = 4.0
+# Weekly probability that a shopper switches archetype; churn hazards apply from this day.
+ARCHETYPE_DRIFT_WEEKLY = 0.03
+SIMULATION_CHURN_START_DAY = 7
+# A buy needs a view of the same SKU by the same user within this many days.
+SIMULATION_VIEW_MEMORY_DAYS = 7

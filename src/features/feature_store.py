@@ -95,6 +95,69 @@ def validate_split(
             )
 
 
+REFERENCE_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def split_for_window(
+    max_event_timestamp: datetime,
+    min_event_timestamp: Optional[datetime] = None,
+    prediction_window_days: int = PREDICTION_WINDOW_DAYS,
+    train_ref_dates: Sequence[str] = TRAIN_REFERENCE_DATES,
+    test_ref_date: str = TEST_REFERENCE_DATE,
+) -> Tuple[List[str], str]:
+    """
+    The configured split when its test window fits the data; otherwise the latest split on
+    the same weekly grid that does.
+
+    The grid is the configured test reference date moved back in whole weeks. The test date is
+    the latest grid date whose target window ends by `max_event_timestamp`; the train dates are
+    the up to `len(train_ref_dates)` grid dates before it whose windows end by the test date and,
+    when `min_event_timestamp` is given, that have at least one window of history counted from
+    the midnight of the first event's day. Shorter
+    experiment runs (a 30 or 45 day simulation) use this instead of shifting dates by hand; the
+    result always passes `validate_split`. Raises ValueError when no such split exists.
+    """
+    window = timedelta(days=prediction_window_days)
+    data_end = _parse_ref(max_event_timestamp)
+    test = _parse_ref(test_ref_date)
+    step = timedelta(days=7)
+    while test + window > data_end:
+        test -= step
+    n_train = max(1, len(list(train_ref_dates)))
+    earliest = None
+    if min_event_timestamp is not None:
+        first = _parse_ref(min_event_timestamp)
+        # History is counted in whole days from the midnight of the first event's day.
+        earliest = datetime.combine(first.date(), datetime.min.time()) + window
+    trains: List[datetime] = []
+    ref = test - step
+    while len(trains) < n_train and (earliest is None or ref >= earliest):
+        if ref + window <= test:
+            trains.append(ref)
+        ref -= step
+    if not trains:
+        raise ValueError(f"no weekly split fits data ending {data_end}")
+    train_out = [r.strftime(REFERENCE_DATE_FORMAT) for r in sorted(trains)]
+    test_out = test.strftime(REFERENCE_DATE_FORMAT)
+    validate_split(train_out, test_out, prediction_window_days, max_event_timestamp=data_end)
+    return train_out, test_out
+
+
+def split_for_warehouse(
+    db_path: Optional[Union[str, Path]] = None,
+    prediction_window_days: int = PREDICTION_WINDOW_DAYS,
+) -> Tuple[List[str], str]:
+    """`split_for_window` over the first and last `fact_events` timestamps of a warehouse."""
+    con = duckdb.connect(str(db_path or DEFAULT_DB_PATH), read_only=True)
+    try:
+        first, last = con.execute("SELECT MIN(timestamp), MAX(timestamp) FROM fact_events").fetchone()
+    finally:
+        con.close()
+    if last is None:
+        raise ValueError("fact_events is empty; cannot choose a split")
+    return split_for_window(last, first, prediction_window_days)
+
+
 def compute_target_variables(
     reference_date: Union[str, datetime],
     prediction_window_days: int = 7,

@@ -122,9 +122,9 @@ def test_hdbscan_finds_clusters_in_reduced_space(prepared):
     """
     Verifies HDBSCAN recovers clusters once dimensionality is reduced.
 
-    Run on the full twelve standardized dimensions this labelled every user as noise,
-    because 400 points are too sparse there for any region to clear the density
-    threshold.
+    Run on the full twelve standardized dimensions this labelled every user as noise
+    when the population was 400 users, because the points were too sparse there for any
+    region to clear the density threshold.
     """
     _, X, _, _ = prepared
 
@@ -138,9 +138,15 @@ def test_hdbscan_finds_clusters_in_reduced_space(prepared):
     # Noise points carry label -1 and must not be counted as a cluster.
     assert -1 not in [int(c) for c in quality["cluster_sizes"]]
 
+    # Reduction must recover structure at least as well as the full space. With 400 users the
+    # full space found no cluster at all; with the 1,000-user population (v1.4) it finds small
+    # extra fragments, so separation (silhouette) is compared, not the cluster count.
     _, full_labels = fit_hdbscan(X, min_cluster_size=15, n_components=None)
     full_quality = score_clustering(X, full_labels)
-    assert quality["n_clusters"] >= full_quality["n_clusters"]
+    if full_quality["n_clusters"] >= 2 and full_quality["silhouette"] is not None:
+        assert quality["silhouette"] >= full_quality["silhouette"]
+    else:
+        assert quality["n_clusters"] >= full_quality["n_clusters"]
 
 
 def test_score_clustering_handles_degenerate_input():

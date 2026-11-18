@@ -178,10 +178,10 @@ def test_run_simulation_seed_changes_events_and_is_reproducible(tmp_path):
 
 
 def test_run_simulation_default_matches_committed_warehouse(tmp_path):
-    """Default flags reproduce v1.0: event count and first and last event ids match."""
+    """Default flags reproduce the default warehouse: event count and smallest and largest ids match."""
     from src.ingestion.simulate_users import simulate_events_dataset
 
-    events, _ = simulate_events_dataset(num_users=400, days=30)
+    events, _ = simulate_events_dataset()
     con = duckdb.connect(str(DEFAULT_DB_PATH), read_only=True)
     try:
         count, first, last = con.execute(
@@ -189,9 +189,11 @@ def test_run_simulation_default_matches_committed_warehouse(tmp_path):
         ).fetchone()
     finally:
         con.close()
+    # Event ids are per user (v1.4), so the ids sort by user, not by time.
+    ids = [e["event_id"] for e in events]
     assert len(events) == count
-    assert events[0]["event_id"] == first
-    assert events[-1]["event_id"] == last
+    assert min(ids) == first
+    assert max(ids) == last
 
 
 def test_run_simulation_writes_only_to_given_paths(tmp_path):

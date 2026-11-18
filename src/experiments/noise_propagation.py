@@ -83,7 +83,7 @@ def run_level(noise: float, out_dir: Path, users: int, days: int, seed: int) -> 
     Returns the accuracy block, the propensity metrics, and per-user test scores for pairing.
     """
     from src.experiments.run_seeds import _deterministic_lightgbm
-    from src.features.feature_store import generate_train_test_datasets, get_modeling_matrices
+    from src.features.feature_store import generate_train_test_datasets, get_modeling_matrices, split_for_warehouse
     from src.features.feature_validation import run_feature_validation_pipeline
     from src.features.sessionizer import run_sessionization_pipeline
     from src.ingestion.simulate_users import run_simulation
@@ -100,7 +100,9 @@ def run_level(noise: float, out_dir: Path, users: int, days: int, seed: int) -> 
         sim = run_simulation(num_users=users, days=days, db_path=str(db_path), output_parquet=str(events_path),
                              seed=seed, ocr_noise=noise, workers=LOAD_WORKERS, truth_parquet=str(truth_path))
         run_sessionization_pipeline(db_path=db_path)
-        generate_train_test_datasets(db_path=db_path, features_dir=features_dir)
+        train_refs, test_ref = split_for_warehouse(db_path)
+        generate_train_test_datasets(train_ref_dates=train_refs, test_ref_date=test_ref,
+                                     db_path=db_path, features_dir=features_dir)
         run_feature_validation_pipeline(features_dir=features_dir)
         prop = run_training_pipeline(features_dir=features_dir, artifacts_dir=artifacts_dir)
         X_test, y_test, _ = get_modeling_matrices(split="test", target_col=PRIMARY_TARGET, features_dir=features_dir)

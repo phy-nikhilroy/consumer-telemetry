@@ -326,10 +326,14 @@ def load_user_archetypes(
     if not path.exists() or "archetype" not in pl.read_parquet_schema(path):
         return None
 
+    # Archetypes drift (v1.4), so a user's archetype is the one most of their events carry;
+    # ties break by name so the result never depends on row order.
     return (
         pl.read_parquet(path, columns=["user_id", "archetype"])
-        .unique(subset=["user_id"])
-        .sort("user_id")
+        .group_by(["user_id", "archetype"]).len()
+        .sort(["user_id", "len", "archetype"], descending=[False, True, False])
+        .group_by("user_id", maintain_order=True).first()
+        .select("user_id", "archetype")
     )
 
 

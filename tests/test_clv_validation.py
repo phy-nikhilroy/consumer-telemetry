@@ -20,6 +20,8 @@ from hypothesis import given, settings, strategies as st
 from src.features.database import DatabaseManager
 
 CAL_END = "2026-10-18 00:00:00"
+# The clv_db fixture spans the v1.1 window, so the regressor tests pass its dates explicitly.
+FIXTURE_REGRESSOR_DATES = ("2026-10-09 00:00:00", "2026-10-18 00:00:00", 9)
 HOLDOUT_DAYS = 9
 START = datetime(2026, 9, 1)
 N_USERS = 150
@@ -358,15 +360,17 @@ def test_evaluate_clv_regressor_signature_defaults():
     from src.models.clv_validation import evaluate_clv_regressor
 
     p = inspect.signature(evaluate_clv_regressor).parameters
-    assert p["train_ref"].default == "2026-10-09 00:00:00"
-    assert p["test_ref"].default == "2026-10-18 00:00:00"
-    assert p["horizon_days"].default == 9
+    from src.config import CLV_CALIBRATION_END, CLV_HOLDOUT_DAYS, CLV_REGRESSOR_TRAIN_REF
+
+    assert p["train_ref"].default == CLV_REGRESSOR_TRAIN_REF
+    assert p["test_ref"].default == CLV_CALIBRATION_END
+    assert p["horizon_days"].default == CLV_HOLDOUT_DAYS
 
 
 def test_evaluate_clv_regressor_reports_metrics(clv_db):
     from src.models.clv_validation import evaluate_clv_regressor
 
-    out = evaluate_clv_regressor(clv_db)
+    out = evaluate_clv_regressor(clv_db, *FIXTURE_REGRESSOR_DATES)
     assert isinstance(out, dict)
     keys = " ".join(out) + " " + json.dumps(out, default=str)
     assert "spearman" in keys.lower()
@@ -378,13 +382,13 @@ def test_evaluate_clv_regressor_unchanged_by_events_after_horizon(clv_db, tmp_pa
     """Dropping events after test_ref + horizon cannot change the regressor result."""
     from src.models.clv_validation import evaluate_clv_regressor
 
-    base = evaluate_clv_regressor(clv_db)
+    base = evaluate_clv_regressor(clv_db, *FIXTURE_REGRESSOR_DATES)
     copy = tmp_path / "trim.duckdb"
     copy.write_bytes(clv_db.read_bytes())
     con = duckdb.connect(str(copy))
     con.execute("DELETE FROM fact_events WHERE timestamp > TIMESTAMP '2026-10-27 00:00:00'")
     con.close()
-    trimmed = evaluate_clv_regressor(copy)
+    trimmed = evaluate_clv_regressor(copy, *FIXTURE_REGRESSOR_DATES)
     assert json.dumps(trimmed, sort_keys=True, default=str) == json.dumps(base, sort_keys=True, default=str)
 
 

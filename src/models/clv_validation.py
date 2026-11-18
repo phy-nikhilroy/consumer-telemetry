@@ -37,7 +37,8 @@ import polars as pl
 from scipy.stats import spearmanr
 
 from src.config import (
-    CLV_HOLDOUT_CALIBRATION_END,
+    CLV_CALIBRATION_END,
+    CLV_REGRESSOR_TRAIN_REF,
     CLV_HOLDOUT_DAYS,
     CLV_ORDER_VALUE_SHRINKAGE_K,
     DEFAULT_DB_PATH,
@@ -287,9 +288,9 @@ def _regression_matrix(
 
 def evaluate_clv_regressor(
     db_path: Union[str, Path],
-    train_ref: str = "2026-10-09 00:00:00",
-    test_ref: str = "2026-10-18 00:00:00",
-    horizon_days: int = 9,
+    train_ref: str = CLV_REGRESSOR_TRAIN_REF,
+    test_ref: str = CLV_CALIBRATION_END,
+    horizon_days: int = CLV_HOLDOUT_DAYS,
 ) -> Dict[str, Any]:
     """
     Compares a Tweedie LightGBM spend regressor with BG/NBD and Gamma-Gamma.
@@ -354,7 +355,7 @@ def run_clv_validation(db_path: Optional[Union[str, Path]] = None) -> Dict[str, 
     from src.release.reporting import write_report
 
     db = db_path or DEFAULT_DB_PATH
-    results = evaluate_clv_holdout(db, CLV_HOLDOUT_CALIBRATION_END, CLV_HOLDOUT_DAYS)
+    results = evaluate_clv_holdout(db, CLV_CALIBRATION_END, CLV_HOLDOUT_DAYS)
     results["regressor_comparison"] = evaluate_clv_regressor(db)
     path = write_report("v1_1_clv", "1.1", results)
     print(f"Holdout customers: {results['n_customers']}, "
