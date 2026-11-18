@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "release": "1.3",
+  "generated_at": "2026-11-18T15:31:25+00:00",
+  "git_commit": "b057c78",
+  "seed": 42,
+  "results": {
+    "seed": 42,
+    "users": 400,
+    "days": 30,
+    "baseline_noise": 0.0,
+    "noise_levels": [
+      0.0,
+      0.02,
+      0.05
+    ],
+    "levels": {
+      "0": {
+        "noise": 0.0,
+        "total_events": 138242,
+        "accuracy": {
+          "events": 138242,
+          "matched": 138242,
+          "action": 1.0,
+          "price": 1.0,
+          "identity": 1.0,
+          "sku_collisions": 0
+        },
+        "propensity_test": {
+          "roc_auc": 0.8817536838275423,
+          "ci": {
+            "point": 0.8817536838275423,
+            "lo": 0.8460269521155113,
+            "hi": 0.9140163481248623
+          },
+          "pr_auc": 0.8195390370520904
+        },
+        "delta_vs_baseline": {
+          "delta": 0.0,
+          "lo": 0.0,
+          "hi": 0.0,
+          "shared_users": 400
+        }
+      },
+      "0.02": {
+        "noise": 0.02,
+        "total_events": 138242,
+        "accuracy": {
+          "events": 138242,
+          "matched": 138242,
+          "action": 0.9972801319425355,
+          "price": 0.9999710652334313,
+          "identity": 0.9034591513432966,
+          "sku_collisions": 17
+        },
+        "propensity_test": {
+          "roc_auc": 0.8728385416666666,
+          "ci": {
+            "point": 0.8728385416666666,
+            "lo": 0.836118271723311,
+            "hi": 0.9059184119828222
+          },
+          "pr_auc": 0.7997176683361101
+        },
+        "delta_vs_baseline": {
+          "delta": -0.006003274513370904,
+          "lo": -0.018078842105094882,
+          "hi": 0.006319793681495857,
+          "shared_users": 400
+        }
+      },
+      "0.05": {
+        "noise": 0.05,
+        "total_events": 138242,
+        "accuracy": {
+          "events": 138242,
+          "matched": 138242,
+          "action": 0.9936849871963658,
+          "price": 0.999884260933725,
+          "identity": 0.7359268529101142,
+          "sku_collisions": 17
+        },
+        "propensity_test": {
+          "roc_auc": 0.8739170506912444,
+          "ci": {
+            "point": 0.8739170506912444,
+            "lo": 0.8351787589651639,
+            "hi": 0.9086343954529656
+          },
+          "pr_auc": 0.7959001724896397
+        },
+        "delta_vs_baseline": {
+          "delta": -0.007146755373060643,
+          "lo": -0.021019811243690754,
+          "hi": 0.007044153165774658,
+          "shared_users": 400
+        }
+      }
+    }
+  },
+  "tripwire_notes": []
+}

@@ -7,17 +7,17 @@
     "avg_order_value",
     "cross_app_comparison_count"
   ],
-  "ari_vs_archetype": 0.3601026551885061,
-  "bootstrap_stability": 0.9631659281668574,
+  "ari_vs_archetype": 0.36445585531590924,
+  "bootstrap_stability": 0.9690454081817335,
   "gmm_bic_by_k": {
-    "3": -6006.1497147283335,
-    "4": -6323.169857482082,
-    "5": -6182.763844930579,
-    "6": -5809.788444028045,
-    "7": -5923.820498483577,
-    "8": -6417.316680120504
+    "3": -6101.7398611248045,
+    "4": -6616.50828800893,
+    "5": -6859.354864272839,
+    "6": -7282.85225355199,
+    "7": -7199.514321759033,
+    "8": -7034.556858907024
   },
-  "gmm_best_k": 8,
+  "gmm_best_k": 6,
   "feature_names": [
     "total_events_30d",
     "total_purchases_30d",
@@ -47,31 +47,31 @@
   "k_selection": [
     {
       "k": 3,
-      "inertia": 1970.6470346539256,
-      "silhouette": 0.3969814774062053,
-      "davies_bouldin": 1.1560289376399713,
-      "calinski_harabasz": 284.99602097431205
+      "inertia": 1719.8093439320942,
+      "silhouette": 0.4290326367042559,
+      "davies_bouldin": 1.0614856956131222,
+      "calinski_harabasz": 355.514899012911
     },
     {
       "k": 4,
-      "inertia": 1667.1358445693768,
-      "silhouette": 0.36178494117251847,
-      "davies_bouldin": 1.3229006963329166,
-      "calinski_harabasz": 248.05301251480176
+      "inertia": 1443.8283909593815,
+      "silhouette": 0.3775823895639509,
+      "davies_bouldin": 1.2900417439491751,
+      "calinski_harabasz": 306.8333156262368
     },
     {
       "k": 5,
-      "inertia": 1493.376359998982,
-      "silhouette": 0.346623830739276,
-      "davies_bouldin": 1.346920171383215,
-      "calinski_harabasz": 218.65156915321944
+      "inertia": 1322.5627015464856,
+      "silhouette": 0.35569794268741467,
+      "davies_bouldin": 1.3185257354673001,
+      "calinski_harabasz": 259.645106293068
     },
     {
       "k": 6,
-      "inertia": 1380.31865872772,
-      "silhouette": 0.28058485946209133,
-      "davies_bouldin": 1.28676708659815,
-      "calinski_harabasz": 195.22368113217777
+      "inertia": 1209.811070393875,
+      "silhouette": 0.26862749441363465,
+      "davies_bouldin": 1.318898878906435,
+      "calinski_harabasz": 233.843857587497
     }
   ],
   "selected_k": 3,
@@ -81,96 +81,96 @@
     "n_noise": 0,
     "noise_fraction": 0.0,
     "cluster_sizes": {
-      "0": 133,
-      "1": 82,
-      "2": 185
+      "0": 186,
+      "1": 132,
+      "2": 82
     },
-    "silhouette": 0.3969814774062053,
-    "davies_bouldin": 1.1560289376399713
+    "silhouette": 0.429032636704256,
+    "davies_bouldin": 1.0614856956131222
   },
   "hdbscan_quality": {
     "n_clusters": 2,
-    "n_noise": 67,
-    "noise_fraction": 0.1675,
+    "n_noise": 32,
+    "noise_fraction": 0.08,
     "cluster_sizes": {
-      "0": 207,
+      "0": 242,
       "1": 126
     },
-    "silhouette": 0.4918299723857711,
-    "davies_bouldin": 0.7458198601354357
+    "silhouette": 0.5030775349648824,
+    "davies_bouldin": 0.7043844454956174
   },
-  "pca_explained_variance": 0.7089006511050282,
+  "pca_explained_variance": 0.7441227984768816,
   "segments": [
     {
       "cluster": 0,
-      "name": "Window Shoppers",
-      "users": 133,
-      "description": "133 users with low avg order value, low total spend 30d, high days since last purchase"
+      "name": "Bargain Hunters",
+      "users": 186,
+      "description": "186 users with high pct purchases with discount, high avg order value, high total spend 30d"
     },
     {
       "cluster": 1,
-      "name": "Single-App Regulars",
-      "users": 82,
-      "description": "82 users with low app entropy, high dominant app share, high view to cart ratio"
+      "name": "Window Shoppers",
+      "users": 132,
+      "description": "132 users with low avg order value, low total spend 30d, low pct purchases with discount"
     },
     {
       "cluster": 2,
-      "name": "Comparison Shoppers",
-      "users": 185,
-      "description": "185 users with high avg order value, high total spend 30d, high pct purchases with discount"
+      "name": "Single-App Regulars",
+      "users": 82,
+      "description": "82 users with low app entropy, high dominant app share, high view to cart ratio"
     }
   ],
   "cluster_profile": [
     {
       "cluster": 0,
-      "users": 133,
-      "total_events_30d": 214.52631578947367,
-      "total_purchases_30d": 0.045112781954887216,
-      "total_spend_30d": 299.10894736842107,
-      "avg_order_value": 299.10894736842107,
-      "app_entropy": 1.9583082706766917,
-      "dominant_app_share": 0.32650527358055115,
-      "cross_app_comparison_count": 21.18045112781955,
-      "view_to_cart_ratio": 0.03856917470693588,
-      "cart_to_purchase_ratio": 0.004197744186967611,
-      "avg_discount_pct_on_purchases": 0.0,
-      "pct_purchases_with_discount": 0.0,
-      "days_since_last_purchase": 11.841666666666667,
-      "predicted_clv": 291352.22291553847
+      "users": 186,
+      "total_events_30d": 182.01075268817203,
+      "total_purchases_30d": 3.661290322580645,
+      "total_spend_30d": 68987.79295698924,
+      "avg_order_value": 18696.629731182795,
+      "app_entropy": 1.9204231182795697,
+      "dominant_app_share": 0.37255430221557617,
+      "cross_app_comparison_count": 26.817204301075268,
+      "view_to_cart_ratio": 0.0929354876279831,
+      "cart_to_purchase_ratio": 0.27664461731910706,
+      "avg_discount_pct_on_purchases": 28.324139784946237,
+      "pct_purchases_with_discount": 0.8922317204301075,
+      "days_since_last_purchase": 4.748655913978495,
+      "predicted_clv": 116449.65728665666
     },
     {
       "cluster": 1,
-      "users": 82,
-      "total_events_30d": 166.0487804878049,
-      "total_purchases_30d": 6.097560975609756,
-      "total_spend_30d": 151911.10475609757,
-      "avg_order_value": 26083.986341463413,
-      "app_entropy": 1.095909756097561,
-      "dominant_app_share": 0.7732073068618774,
-      "cross_app_comparison_count": 6.097560975609756,
-      "view_to_cart_ratio": 0.16360244154930115,
-      "cart_to_purchase_ratio": 0.27292683720588684,
-      "avg_discount_pct_on_purchases": 12.17280487804878,
-      "pct_purchases_with_discount": 0.5277073383331299,
-      "days_since_last_purchase": 2.8809756097560975,
-      "predicted_clv": 261795.63512299143
+      "users": 132,
+      "total_events_30d": 215.8560606060606,
+      "total_purchases_30d": 0.030303030303030304,
+      "total_spend_30d": 237.23992424242422,
+      "avg_order_value": 237.23992424242422,
+      "app_entropy": 1.9577045454545452,
+      "dominant_app_share": 0.3275265097618103,
+      "cross_app_comparison_count": 36.22727272727273,
+      "view_to_cart_ratio": 0.03597651422023773,
+      "cart_to_purchase_ratio": 0.004440151620656252,
+      "avg_discount_pct_on_purchases": 0.0,
+      "pct_purchases_with_discount": 0.0,
+      "days_since_last_purchase": 11.025,
+      "predicted_clv": 368463.82446286734
     },
     {
       "cluster": 2,
-      "users": 185,
-      "total_events_30d": 182.78378378378378,
-      "total_purchases_30d": 3.745945945945946,
-      "total_spend_30d": 70255.66345945947,
-      "avg_order_value": 18788.73254054054,
-      "app_entropy": 1.9197875675675677,
-      "dominant_app_share": 0.37353187799453735,
-      "cross_app_comparison_count": 15.172972972972973,
-      "view_to_cart_ratio": 0.09344648569822311,
-      "cart_to_purchase_ratio": 0.27790865302085876,
-      "avg_discount_pct_on_purchases": 14.910432432432431,
-      "pct_purchases_with_discount": 0.5865216255187988,
-      "days_since_last_purchase": 4.640162162162162,
-      "predicted_clv": 122819.9950777636
+      "users": 82,
+      "total_events_30d": 166.0487804878049,
+      "total_purchases_30d": 5.951219512195122,
+      "total_spend_30d": 147532.5157317073,
+      "avg_order_value": 25742.306829268295,
+      "app_entropy": 1.095909756097561,
+      "dominant_app_share": 0.7732073068618774,
+      "cross_app_comparison_count": 10.646341463414634,
+      "view_to_cart_ratio": 0.1604219526052475,
+      "cart_to_purchase_ratio": 0.271053671836853,
+      "avg_discount_pct_on_purchases": 26.835487804878053,
+      "pct_purchases_with_discount": 0.8796060975609756,
+      "days_since_last_purchase": 2.9524390243902436,
+      "predicted_clv": 246694.9764811939
     }
   ]
 }

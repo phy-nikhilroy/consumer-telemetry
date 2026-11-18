@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
   "release": "1.2",
-  "generated_at": "2026-11-18T00:18:55+00:00",
-  "git_commit": "c6c0062",
+  "generated_at": "2026-11-18T15:05:13+00:00",
+  "git_commit": "b057c78",
   "seed": 42,
   "results": {
     "throughput": {
       "n_events": 5000,
       "batch_size": 256,
-      "process_events_per_s": 151.3,
-      "process_batch_events_per_s": 443.6,
-      "speedup": 2.93
+      "process_events_per_s": 143.9,
+      "process_batch_events_per_s": 460.0,
+      "speedup": 3.2
     },
     "real": {
       "tune": {
         "n": 5000,
         "category_n": 4861,
-        "brand_accuracy": 0.63,
-        "brand_confidently_wrong_rate": 0.1876,
+        "brand_accuracy": 0.629,
+        "brand_confidently_wrong_rate": 0.1886,
         "price_accuracy": 0.998,
         "rating_accuracy": 1.0,
         "category_accuracy_non_abstained": 0.9154200230149597,
@@ -30,8 +30,8 @@
       "heldout": {
         "n": 15000,
         "category_n": 14513,
-        "brand_accuracy": 0.5972666666666666,
-        "brand_confidently_wrong_rate": 0.2468,
+        "brand_accuracy": 0.5966,
+        "brand_confidently_wrong_rate": 0.24746666666666667,
         "price_accuracy": 0.9944666666666667,
         "rating_accuracy": 1.0,
         "category_accuracy_non_abstained": 0.8935759300670868,
@@ -44,8 +44,8 @@
         ]
       },
       "gap": {
-        "brand_accuracy": 0.03273333333333339,
-        "brand_confidently_wrong_rate": -0.0592,
+        "brand_accuracy": 0.032399999999999984,
+        "brand_confidently_wrong_rate": -0.05886666666666668,
         "price_accuracy": 0.0035333333333332773,
         "rating_accuracy": 0.0,
         "category_accuracy_non_abstained": 0.02184409294787293,
@@ -67,26 +67,26 @@
         "0.01": {
           "noise_rate": 0.01,
           "n_listings": 4083,
-          "price_accuracy": 0.9823659074210139,
-          "brand_accuracy": 0.9578741121724222,
+          "price_accuracy": 1.0,
+          "brand_accuracy": 0.9649767327945138,
           "segment_count_accuracy": 1.0,
-          "segmentation_accuracy": 0.964
+          "segmentation_accuracy": 1.0
         },
         "0.02": {
           "noise_rate": 0.02,
           "n_listings": 4083,
-          "price_accuracy": 0.9679157482243449,
-          "brand_accuracy": 0.9478324761204996,
+          "price_accuracy": 1.0,
+          "brand_accuracy": 0.9630173891746265,
           "segment_count_accuracy": 1.0,
-          "segmentation_accuracy": 0.935
+          "segmentation_accuracy": 1.0
         },
         "0.05": {
           "noise_rate": 0.05,
           "n_listings": 4083,
-          "price_accuracy": 0.9061964241978937,
-          "brand_accuracy": 0.9123193730100416,
+          "price_accuracy": 0.9997550820475141,
+          "brand_accuracy": 0.9453832965956405,
           "segment_count_accuracy": 1.0,
-          "segmentation_accuracy": 0.8205
+          "segmentation_accuracy": 0.9995
         }
       }
     },
@@ -94,27 +94,27 @@
       "tune": {
         "split": "tune",
         "n": 3000,
-        "positive_rate": 0.394,
+        "positive_rate": 0.3933333333333333,
         "learned": {
-          "ece": 0.04367966701567967,
-          "auc": 0.8337207451709637
+          "ece": 0.043697609582205976,
+          "auc": 0.8332275563419633
         },
         "hand_weighted": {
-          "ece": 0.4082770333333333,
-          "auc": 0.8089940973792811
+          "ece": 0.4091172,
+          "auc": 0.8068939746693984
         }
       },
       "heldout": {
         "split": "heldout",
         "n": 3000,
-        "positive_rate": 0.39666666666666667,
+        "positive_rate": 0.3953333333333333,
         "learned": {
-          "ece": 0.03715948799294677,
-          "auc": 0.8218821672315335
+          "ece": 0.03676680497647394,
+          "auc": 0.8214366060488871
         },
         "hand_weighted": {
-          "ece": 0.40633339999999996,
-          "auc": 0.8112328798922883
+          "ece": 0.4078730666666667,
+          "auc": 0.8088850350747698
         }
       }
     }
