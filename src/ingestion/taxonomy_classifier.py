@@ -336,18 +336,23 @@ class SupervisedTaxonomyClassifier:
         product_title: str,
         brand: Optional[str] = None,
         min_similarity: Optional[float] = None,
+        model_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Classifies a product. `confidence` is the top class probability and `margin` its lead
         over the second. Below `tau` the prototype classifier answers (`method` records which
         path answered); an empty title abstains. `min_similarity` applies to the fallback.
+
+        `model_text`, when given, is what the supervised model reads (the pipeline passes the
+        listing text, the closest match to the full titles it was trained on); the prototype
+        fallback always reads the brand and title it was written for.
         """
         if not product_title or not product_title.strip():
             result = _unknown()
             result.update({"method": METHOD_SUPERVISED, "model_abstained": True, "model_label": None,
                            "model_assigned_probability": 0.0})
             return result
-        query = taxonomy_query(product_title, brand)
+        query = model_text.strip() if model_text and model_text.strip() else taxonomy_query(product_title, brand)
         probs = self.predict_proba([query])[0]
         order = np.argsort(probs)[::-1]
         top = float(probs[order[0]])
@@ -436,14 +441,17 @@ def classify_product(
     product_title: str,
     brand: Optional[str] = None,
     min_similarity: Optional[float] = None,
+    model_text: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Classifies a product with the supervised model when its artifact exists, otherwise with
-    the prototype classifier. Both are built once per process and reused.
+    the prototype classifier. Both are built once per process and reused. `model_text` is
+    read only by the supervised model (see `SupervisedTaxonomyClassifier.classify_product`).
     """
     supervised = get_supervised_classifier()
     if supervised is not None:
-        return supervised.classify_product(product_title, brand, min_similarity=min_similarity)
+        return supervised.classify_product(product_title, brand, min_similarity=min_similarity,
+                                           model_text=model_text)
     result = _prototype_classifier().classify_product(product_title, brand, min_similarity=min_similarity)
     result["method"] = METHOD_PROTOTYPE
     return result

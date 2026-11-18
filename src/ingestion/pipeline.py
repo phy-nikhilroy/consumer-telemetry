@@ -27,10 +27,16 @@ from src.ingestion.ner_extractor import (
     extract_product_title,
     extract_specs,
 )
-from src.ingestion.taxonomy_classifier import METHOD_SUPERVISED, classify_product, warm_taxonomy_queries
+from src.ingestion.taxonomy_classifier import (
+    METHOD_SUPERVISED,
+    classify_product,
+    get_supervised_classifier,
+    warm_taxonomy_queries,
+)
 from src.ingestion.entity_resolver import compute_canonical_key, compute_canonical_name
 from src.ingestion.confidence_model import predict_confidence
 from src.ingestion.segmenter import segment_screen
+from src.ingestion.entity_matcher import is_interface_word, strip_offer_text
 
 if TYPE_CHECKING:
     from src.ingestion.entity_matcher import ProductRegistry
@@ -207,6 +213,22 @@ def calculate_hand_weighted_confidence(extracted: Dict[str, Any]) -> float:
     return round(score, 4)
 
 
+def taxonomy_text(raw_text: str, product_title: Optional[str]) -> str:
+    """
+    The text the taxonomy classifier sees: the listing with prices, ratings, delivery details,
+    and interface words ("Add to Cart", "Sponsored") stripped, or "" when no title was
+    extracted (which abstains).
+
+    The supervised model is trained on full Amazon titles. Classifying the extracted title
+    instead, which keeps only its first four tokens, cut tune accuracy among confident rows
+    from 0.85 to 0.62 and raised abstention from 34 to 61 percent.
+    """
+    if not product_title:
+        return ""
+    words = strip_offer_text(raw_text).split()
+    return " ".join(w for w in words if not is_interface_word(w))
+
+
 def _linguistic_fields(raw_text: str) -> tuple:
     """Brand, brand source, title, and specs of one text."""
     brand, brand_source = extract_brand_with_source(raw_text)
@@ -250,7 +272,8 @@ def _build_product(
     price_verified = price_is_verified(price_info.get("price"), ner_amounts)
 
     # 3. Semantic taxonomy classification
-    taxonomy_info = classify_product(product_title or "", brand=brand)
+    taxonomy_info = classify_product(product_title or "", brand=brand,
+                                     model_text=taxonomy_text(raw_text, product_title))
 
     # 4. Entity resolution
     canonical_id = compute_canonical_key(brand, product_title, specs)
@@ -349,6 +372,29 @@ def process_screen(
     return products
 
 
+def _warm_taxonomy_for_batch(texts: List[str], fields: List[tuple], batch_size: int) -> None:
+    """
+    Encodes, in batches, every taxonomy query the records below will ask for. The supervised
+    model reads the listing text; its prototype fallback reads brand and title, but only for
+    rows the model abstains on, so the model is scored first (from the cached vectors) and
+    fallback queries are encoded for the abstaining rows alone. Classification itself still
+    happens per record in `_build_product`, so the output equals `process`.
+    """
+    model_queries = [(taxonomy_text(t, f[2]), None) for t, f in zip(texts, fields)]
+    fallback_queries = [(f[2], f[0]) for f in fields]
+    supervised = get_supervised_classifier()
+    if supervised is None:
+        warm_taxonomy_queries(fallback_queries, batch_size=batch_size)
+        return
+    warm_taxonomy_queries(model_queries, batch_size=batch_size)
+    scored = [i for i, (q, _) in enumerate(model_queries) if q]
+    if not scored:
+        return
+    probs = supervised.predict_proba([model_queries[i][0] for i in scored])
+    abstaining = [i for i, top in zip(scored, probs.max(axis=1)) if top < supervised.tau]
+    warm_taxonomy_queries([fallback_queries[i] for i in abstaining], batch_size=batch_size)
+
+
 def process_batch(
     raw_texts: Sequence[str],
     app_sources: Optional[Sequence[str]] = None,
@@ -374,7 +420,7 @@ def process_batch(
     texts = list(raw_texts)
     amounts = extract_price_mentions_batch(texts, batch_size=batch_size)
     fields = [_linguistic_fields(t) for t in texts]
-    warm_taxonomy_queries([(f[2], f[0]) for f in fields], batch_size=batch_size)
+    _warm_taxonomy_for_batch(texts, fields, batch_size)
     return [
         _build_product(
             texts[i],

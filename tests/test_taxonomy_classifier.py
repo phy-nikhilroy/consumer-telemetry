@@ -203,3 +203,44 @@ def test_committed_artifact_loads_with_expected_keys():
     assert set(artifact) == {"model", "labels", "tau", "encoder_name", "trained_on_rows"}
     assert 0.0 < artifact["tau"] <= 0.95
     assert len(artifact["labels"]) == len(artifact["model"].classes_)
+
+
+class _RecordingModel(_FixedModel):
+    """Fixed probabilities; records how many rows it was asked about."""
+
+    def __init__(self, probs):
+        super().__init__(probs)
+        self.seen = 0
+
+    def predict_proba(self, x):
+        self.seen += len(x)
+        return super().predict_proba(x)
+
+
+def test_model_text_feeds_the_model_and_the_fallback_keeps_the_title(monkeypatch):
+    queries = []
+    clf = _supervised([0.55, 0.45], l2="Footwear")
+    original = clf.predict_proba
+
+    def spy(qs):
+        queries.extend(qs)
+        return original(qs)
+
+    monkeypatch.setattr(clf, "predict_proba", spy)
+    titles = []
+    proto = clf.prototype
+    real = proto.classify_product
+    proto.classify_product = lambda t, b=None, min_similarity=None: titles.append((t, b)) or real(t, b, min_similarity)
+    res = clf.classify_product("Smash v2", brand="Puma", model_text="Puma Smash v2 Leather Sneaker White In stock")
+    assert queries == ["Puma Smash v2 Leather Sneaker White In stock"]
+    assert titles == [("Smash v2", "Puma")]
+    assert res["method"] == METHOD_FALLBACK
+
+
+def test_blank_model_text_falls_back_to_brand_and_title(monkeypatch):
+    queries = []
+    clf = _supervised([0.1, 0.9])
+    original = clf.predict_proba
+    monkeypatch.setattr(clf, "predict_proba", lambda qs: queries.extend(qs) or original(qs))
+    clf.classify_product("Zoom lens", brand="Canon", model_text="   ")
+    assert queries == ["Canon Zoom lens"]

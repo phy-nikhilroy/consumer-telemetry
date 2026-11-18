@@ -145,6 +145,16 @@ def _is_noise(token: str) -> bool:
     return bool(wordy) and all(p in UI_WORDS or p in STOPWORDS or p.isdigit() for p in parts)
 
 
+def is_interface_word(word: str) -> bool:
+    """
+    Whether a whitespace-separated word of listing text is interface chrome, a stopword, or
+    bare punctuation (compared lower case, without surrounding punctuation); model numbers
+    are never.
+    """
+    token = word.strip(".,:;!?()[]{}\"'").lower()
+    return not token or _is_noise(token)
+
+
 def record_name(record: dict) -> str:
     """
     The text a record is matched on, lower case, with capacities normalised, interface words
