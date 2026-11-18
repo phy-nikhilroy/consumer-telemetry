@@ -291,3 +291,46 @@ def test_extract_price_fold_roundtrip_property(digits, data) -> None:
 def test_extract_price_does_not_fold_lookalike_glued_to_digits(text: str, expected: float) -> None:
     """A word run straight into the number keeps its own letters; only the number is folded."""
     assert extract_price(text)["price"] == expected
+
+
+# --------------------------------------------------------------------------- v1.4 regressions
+# Found on the 1,000-user simulation: OCR "Similar" to "5imilar" after "stars", a bank offer's
+# percentage, and a lookalike inside the listing's own discount.
+
+
+def test_rs_inside_a_word_is_not_a_currency_marker():
+    text = "Sony WH-1000XM5 Black\n₹30,282\n4.6 out of S stars 5imilar Products\nIn stock"
+    out = extract_price(text)
+    assert out["price"] == 30282.0
+    assert out["currency"] == "INR"
+
+
+def test_bank_offer_percentage_is_not_the_listing_discount():
+    text = "Sony WH-1000XM5 Black\n₹30,282\n4.6 out of 5 stars Bank Offer 10% off on SBI Credit Card\nIn stock"
+    out = extract_price(text)
+    assert out["price"] == 30282.0
+    assert out["discount_pct"] == 0
+    assert out["mrp"] == 30282.0
+
+
+def test_listing_discount_wins_over_a_later_bank_offer():
+    text = "₹73,582 M.R.P: ₹81,758 (10% off) 3.7 ★ Bank Offer 15% off on SBI Credit Card"
+    out = extract_price(text)
+    assert (out["price"], out["mrp"], out["discount_pct"]) == (73582.0, 81758.0, 10)
+
+
+def test_lookalike_in_discount_token_is_folded():
+    out = extract_price("₹73,582 M.R.P: ₹81,758 (l0% off) 3.7 ★")
+    assert out["discount_pct"] == 10
+
+
+def test_noisy_stars_and_bank_offer_together():
+    text = "Sony WH-1000XM5 Black\n₹30,282\n4.6 out of S stars 5imilar Products Bank Offer 10% off on SBI Credit Card\nIn stock"
+    out = extract_price(text)
+    assert (out["price"], out["discount_pct"]) == (30282.0, 0)
+
+
+def test_rs_and_inr_markers_still_parse():
+    assert extract_price("Item Rs. 999")["price"] == 999.0
+    assert extract_price("Item INR 450")["price"] == 450.0
+    assert extract_price("Was: $89.00 $69.00 save 22%")["price"] == 69.0

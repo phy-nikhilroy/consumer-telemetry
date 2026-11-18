@@ -91,6 +91,38 @@ def fold_price_lookalikes(text: str) -> str:
     return PRICE_TOKEN_PATTERN.sub(_fold_price_token, text)
 
 
+# A percentage inside a payment offer ("Bank Offer 10% off on SBI Credit Card") is not the
+# listing's discount. A match is skipped when one of these words sits just before it or a card
+# is named just after it.
+_OFFER_BEFORE_RE = re.compile(r"(?i)\b(?:bank|offer|cashback|coupon)\b")
+_OFFER_AFTER_RE = re.compile(r"(?i)\bcard\b")
+_OFFER_BEFORE_CHARS = 14
+# A one or two character percentage token with an OCR lookalike ("(l0% off)"): `\d{1,2}%` alone
+# matched its "0%" and reported no discount.
+_DISCOUNT_TOKEN_RE = re.compile(r"(?<![0-9A-Za-z])([0-9OolI|SB]{1,2})(?=\s?%)")
+
+
+def _fold_discount_token(match: "re.Match[str]") -> str:
+    """Folds lookalikes in a percentage token that already holds a digit."""
+    token = match.group(1)
+    if not any(c.isdigit() for c in token):
+        return token
+    return token.translate(_LOOKALIKE_TO_DIGIT)
+
+_OFFER_AFTER_CHARS = 30
+
+
+def _listing_discount_match(text: str) -> Optional["re.Match[str]"]:
+    """The first discount match that is not part of a payment offer, or None."""
+    for match in DISCOUNT_PATTERN.finditer(text):
+        before = text[max(0, match.start() - _OFFER_BEFORE_CHARS):match.start()]
+        after = text[match.end():match.end() + _OFFER_AFTER_CHARS]
+        if _OFFER_BEFORE_RE.search(before) or _OFFER_AFTER_RE.search(after):
+            continue
+        return match
+    return None
+
+
 def extract_price(text: str) -> Dict[str, Any]:
     """
     Extracts price, currency, mrp, and discount_pct from noisy screen text.
@@ -106,6 +138,7 @@ def extract_price(text: str) -> Dict[str, Any]:
         return {"price": None, "currency": None, "mrp": None, "discount_pct": None}
 
     text = fold_price_lookalikes(text)
+    text = _DISCOUNT_TOKEN_RE.sub(_fold_discount_token, text)
 
     # Determine currency
     currency = None
@@ -116,7 +149,7 @@ def extract_price(text: str) -> Dict[str, Any]:
 
     # Extract discount percentage if present
     discount_pct: Optional[int] = None
-    discount_match = DISCOUNT_PATTERN.search(text)
+    discount_match = _listing_discount_match(text)
     if discount_match:
         val = discount_match.group(1) or discount_match.group(2)
         if val:
@@ -129,7 +162,8 @@ def extract_price(text: str) -> Dict[str, Any]:
     # e.g., M.R.P: ₹75,920 or MRP: $100 or List Price: $99.99 or Was: $89.00
     mrp: Optional[float] = None
     mrp_pattern = re.compile(
-        r"(?:M\.?R\.?P\.?|List\s+Price|Was|Original\s+Price)[:\s]+(?:₹|Rs\.?|INR|\$|USD)?\s*(" + NUMERIC_PRICE_RE + r")",
+        r"(?:M\.?R\.?P\.?|List\s+Price|\bWas|Original\s+Price)[:\s]+(?:₹|\bRs\.?|\bINR\b|\$|\bUSD\b)?\s*("
+        + NUMERIC_PRICE_RE + r")",
         re.IGNORECASE
     )
     mrp_match = mrp_pattern.search(text)
@@ -142,7 +176,9 @@ def extract_price(text: str) -> Dict[str, Any]:
     # Find currency-tagged amounts: (₹|Rs|INR|$)\s*(\d[,\d.]*)
     tagged_prices = []
     symbol_price_pattern = re.compile(
-        r"(?:₹|Rs\.?|INR|\$)\s*(" + NUMERIC_PRICE_RE + r")",
+        # Word boundaries keep "Rs" and "INR" from matching inside words: "stars 5imilar"
+        # (OCR S to 5) once parsed as a 5 rupee price.
+        r"(?:₹|\bRs\.?|\bINR\b|\$)\s*(" + NUMERIC_PRICE_RE + r")",
         re.IGNORECASE
     )
     for m in symbol_price_pattern.finditer(text):
