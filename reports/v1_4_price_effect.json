@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "release": "1.4",
+  "generated_at": "2026-11-19T01:45:19+00:00",
+  "git_commit": "8aa356a",
+  "seed": 42,
+  "results": {
+    "users": 500,
+    "days": 45,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "price_betas": [
+      0.0,
+      4.0,
+      8.0
+    ],
+    "levels": {
+      "0": {
+        "price_beta": 0.0,
+        "chose_cheaper_mean": 0.4326167673512169,
+        "chose_cheaper_by_seed": [
+          {
+            "seed": 42,
+            "users_with_feature": 352,
+            "users": 500,
+            "mean": 0.4272383522727273,
+            "informed_rows": 1385
+          },
+          {
+            "seed": 43,
+            "users_with_feature": 344,
+            "users": 500,
+            "mean": 0.4087226744186046,
+            "informed_rows": 1269
+          },
+          {
+            "seed": 44,
+            "users_with_feature": 345,
+            "users": 500,
+            "mean": 0.46188927536231883,
+            "informed_rows": 1287
+          }
+        ],
+        "regression": {
+          "n": 3941,
+          "coef_log_price_ratio": 0.4033825214251744,
+          "coef_later_is_dominant": 1.5309358572749259,
+          "ci": {
+            "lo": -0.07253889144443178,
+            "hi": 0.8840474350173883,
+            "n_boot_ok": 500
+          }
+        }
+      },
+      "4": {
+        "price_beta": 4.0,
+        "chose_cheaper_mean": 0.5473179391743522,
+        "chose_cheaper_by_seed": [
+          {
+            "seed": 42,
+            "users_with_feature": 352,
+            "users": 500,
+            "mean": 0.5466761363636364,
+            "informed_rows": 1394
+          },
+          {
+            "seed": 43,
+            "users_with_feature": 345,
+            "users": 500,
+            "mean": 0.5210330434782608,
+            "informed_rows": 1267
+          },
+          {
+            "seed": 44,
+            "users_with_feature": 345,
+            "users": 500,
+            "mean": 0.5742446376811595,
+            "informed_rows": 1295
+          }
+        ],
+        "regression": {
+          "n": 3956,
+          "coef_log_price_ratio": -3.162718039709945,
+          "coef_later_is_dominant": 1.5813212630111768,
+          "ci": {
+            "lo": -3.6864814296713235,
+            "hi": -2.6899546630386513,
+            "n_boot_ok": 500
+          }
+        }
+      },
+      "8": {
+        "price_beta": 8.0,
+        "chose_cheaper_mean": 0.6072654620331219,
+        "chose_cheaper_by_seed": [
+          {
+            "seed": 42,
+            "users_with_feature": 352,
+            "users": 500,
+            "mean": 0.6042553977272728,
+            "informed_rows": 1394
+          },
+          {
+            "seed": 43,
+            "users_with_feature": 344,
+            "users": 500,
+            "mean": 0.5835200581395349,
+            "informed_rows": 1265
+          },
+          {
+            "seed": 44,
+            "users_with_feature": 344,
+            "users": 500,
+            "mean": 0.6340209302325581,
+            "informed_rows": 1291
+          }
+        ],
+        "regression": {
+          "n": 3950,
+          "coef_log_price_ratio": -4.860312706370806,
+          "coef_later_is_dominant": 1.549805721125892,
+          "ci": {
+            "lo": -5.488067471003804,
+            "hi": -4.312088035532664,
+            "n_boot_ok": 500
+          }
+        }
+      }
+    }
+  },
+  "tripwire_notes": []
+}
