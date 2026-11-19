@@ -54,8 +54,10 @@ BEHAVIORAL_FEATURES_PATH = FEATURES_DIR / "behavioral_features.parquet"
 USD_TO_INR_RATE = 83.0
 
 # Sessionization parameters
+# Chosen by best mean F1 on seeds 1-3 (tie at 10, 20, 30 broken toward the prior default); see reports/v1_4_detectors.json
 DEFAULT_SESSION_INACTIVITY_MINUTES = 30.0
-DEFAULT_CROSS_APP_WINDOW_MINUTES = 60.0
+# Chosen by best mean F1 on seeds 1-3; see reports/v1_4_detectors.json
+DEFAULT_CROSS_APP_WINDOW_MINUTES = 30.0
 
 # Temporal split. Every train target window (ref, ref + window] must end at or before the
 # test reference date, so no train label ever observes an event the test labels observe.
