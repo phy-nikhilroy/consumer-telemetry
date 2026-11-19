@@ -65,3 +65,34 @@ def test_ensure_current_schema_upgrades_a_v1_warehouse(tmp_path):
         assert con.execute("SELECT COUNT(*) FROM fact_price_observations").fetchone()[0] == 0
     finally:
         con.close()
+
+
+def _report(path, conclusion, grid):
+    import json
+    body = {"dates": {"test_ref": "2015-09-07 00:00:00"}, "data_range": ["a", "b"], "grid": grid,
+            "conclusion": conclusion}
+    path.write_text(json.dumps({"schema_version": 1, "results": body}))
+    return dict(body)
+
+
+def test_conclusion_carried_forward_when_grid_unchanged(tmp_path):
+    from src.experiments.retailrocket_protocol import carry_forward_conclusion
+    grid = [{"name": "c1", "roc_auc": 0.9}]
+    prev = tmp_path / "rr.json"
+    _report(prev, "written analysis", grid)
+    fresh = _report(tmp_path / "unused.json", "", grid)
+    assert carry_forward_conclusion(fresh, prev)["conclusion"] == "written analysis"
+
+
+def test_conclusion_dropped_when_grid_changes(tmp_path):
+    from src.experiments.retailrocket_protocol import carry_forward_conclusion
+    prev = tmp_path / "rr.json"
+    _report(prev, "written analysis", [{"name": "c1", "roc_auc": 0.9}])
+    fresh = _report(tmp_path / "unused.json", "", [{"name": "c1", "roc_auc": 0.8}])
+    assert carry_forward_conclusion(fresh, prev)["conclusion"] == ""
+
+
+def test_conclusion_untouched_without_previous_report(tmp_path):
+    from src.experiments.retailrocket_protocol import carry_forward_conclusion
+    fresh = _report(tmp_path / "unused.json", "", [])
+    assert carry_forward_conclusion(fresh, tmp_path / "missing.json")["conclusion"] == ""

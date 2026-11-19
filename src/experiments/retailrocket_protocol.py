@@ -171,8 +171,34 @@ def run_grid(
     }
 
 
+def carry_forward_conclusion(results: Dict[str, Any], previous_report: Path) -> Dict[str, Any]:
+    """Keeps the hand-written conclusion of `previous_report` when the run reproduces it.
+
+    The conclusion is analysis written after reading the grid and quotes its numbers, so it is
+    kept only when the dates, data range, and every grid cell equal the previous report's.
+    Otherwise the conclusion stays empty (gate G1.1-12 fails) until someone writes a new one.
+    """
+    if results.get("conclusion") or not Path(previous_report).exists():
+        return results
+    try:
+        previous = json.loads(Path(previous_report).read_text()).get("results", {})
+    except (OSError, ValueError):
+        return results
+    keys = ("dates", "data_range", "grid")
+    same = all(json.dumps(previous.get(k), sort_keys=True) == json.dumps(results.get(k), sort_keys=True)
+               for k in keys)
+    if same and str(previous.get("conclusion") or "").strip():
+        return {**results, "conclusion": previous["conclusion"]}
+    if not same:
+        print("RetailRocket grid differs from the previous report: write a new conclusion "
+              f"in {previous_report} (gate G1.1-12).")
+    return results
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
-    """CLI: runs the grid and writes reports/v1_1_retailrocket.json."""
+    """CLI: runs the grid and writes reports/v1_1_retailrocket.json, keeping the conclusion
+    of the previous report when the grid is unchanged."""
+    from src.config import REPORTS_DIR
     from src.release.reporting import write_report
 
     parser = argparse.ArgumentParser(description="RetailRocket disjoint re-run and one-tree grid.")
@@ -180,6 +206,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser.add_argument("--out-dir", type=Path, default=RR_OUT_DIR)
     args = parser.parse_args(argv)
     results = run_grid(args.db_path, args.out_dir)
+    results = carry_forward_conclusion(results, REPORTS_DIR / f"{RR_REPORT_NAME}.json")
     print(write_report(RR_REPORT_NAME, RR_RELEASE, results))
 
 
