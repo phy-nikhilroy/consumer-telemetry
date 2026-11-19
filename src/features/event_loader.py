@@ -26,6 +26,7 @@ import multiprocessing
 import os
 from pathlib import Path
 import sys
+import threading
 import time
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
@@ -154,8 +155,29 @@ def _extract_task(task: Tuple[List[str], List[str], List[datetime]]) -> List[Lis
     return [[_slim(p) for p in screen] for screen in extract_screens(texts, apps, times)]
 
 
-def _init_worker(threads: int) -> None:
-    """Limits each worker's math libraries so that workers do not oversubscribe the cores."""
+# How often a worker checks that the process that started it is still alive.
+_PARENT_POLL_SECONDS = 2.0
+
+
+def _exit_when_orphaned(parent_pid: int, interval: float = _PARENT_POLL_SECONDS) -> None:
+    """Ends the worker as soon as its parent is gone.
+
+    A pool worker holds both ends of its task queue, so it never sees end-of-file when the parent
+    dies without running `atexit` (SIGKILL, the OOM killer, a killed shell). Without this check
+    such workers block forever, each holding spaCy and the encoders in memory.
+    """
+    while True:
+        if os.getppid() != parent_pid:
+            os._exit(0)
+        time.sleep(interval)
+
+
+def _init_worker(threads: int, parent_pid: Optional[int] = None) -> None:
+    """Limits each worker's math libraries so that workers do not oversubscribe the cores,
+    and starts the watchdog that ends the worker when its parent process is gone."""
+    if parent_pid is not None:
+        threading.Thread(target=_exit_when_orphaned, args=(parent_pid,), daemon=True,
+                         name="parent-watchdog").start()
     os.environ["OMP_NUM_THREADS"] = str(threads)
     try:
         import torch
@@ -199,7 +221,7 @@ def _executor(workers: int) -> ProcessPoolExecutor:
             max_workers=workers,
             mp_context=multiprocessing.get_context("spawn"),
             initializer=_init_worker,
-            initargs=(threads,),
+            initargs=(threads, os.getpid()),
         )
     return _EXECUTORS[workers]
 
