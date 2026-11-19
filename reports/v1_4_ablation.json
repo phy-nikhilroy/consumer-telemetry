@@ -1,0 +1,825 @@
+{
+  "schema_version": 1,
+  "release": "1.4",
+  "generated_at": "2026-11-19T02:14:31+00:00",
+  "git_commit": "8aa356a",
+  "seed": 42,
+  "results": {
+    "caveat": "On simulated data this measures recovery of a built-in mechanism: the simulator draws behaviour from archetype parameters, so a block that helps shows the model recovers a mechanism the generator put there, not a property of real consumers. The RetailRocket section is the real-data check.",
+    "seeds": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "users": 500,
+    "days": 60,
+    "blocks": {
+      "rfm": [
+        "days_since_last_event",
+        "days_since_last_purchase",
+        "days_since_last_cart_add",
+        "total_events_7d",
+        "total_events_30d",
+        "total_events_lifetime",
+        "total_purchases_7d",
+        "total_purchases_30d",
+        "total_sessions_7d",
+        "total_sessions_30d",
+        "avg_events_per_session",
+        "total_spend_7d",
+        "total_spend_30d",
+        "total_spend_lifetime",
+        "avg_order_value",
+        "max_single_purchase"
+      ],
+      "funnel": [
+        "view_to_cart_ratio",
+        "cart_to_purchase_ratio",
+        "avg_session_duration_minutes",
+        "avg_time_between_sessions_hours",
+        "weekend_event_share",
+        "evening_event_share"
+      ],
+      "cross_app": [
+        "num_apps_used",
+        "app_entropy",
+        "dominant_app_share",
+        "cross_app_comparison_count",
+        "informed_purchase_count",
+        "chose_cheaper_app_rate",
+        "avg_abs_price_gap_pct"
+      ],
+      "price": [
+        "avg_discount_pct_on_purchases",
+        "pct_purchases_with_discount",
+        "price_range_browsed"
+      ],
+      "category": [
+        "category_diversity"
+      ]
+    },
+    "models": {
+      "A": [
+        "days_since_last_event",
+        "days_since_last_purchase",
+        "days_since_last_cart_add",
+        "total_events_7d",
+        "total_events_30d",
+        "total_events_lifetime",
+        "total_purchases_7d",
+        "total_purchases_30d",
+        "total_sessions_7d",
+        "total_sessions_30d",
+        "avg_events_per_session",
+        "total_spend_7d",
+        "total_spend_30d",
+        "total_spend_lifetime",
+        "avg_order_value",
+        "max_single_purchase"
+      ],
+      "B": [
+        "days_since_last_event",
+        "days_since_last_purchase",
+        "days_since_last_cart_add",
+        "total_events_7d",
+        "total_events_30d",
+        "total_events_lifetime",
+        "total_purchases_7d",
+        "total_purchases_30d",
+        "total_sessions_7d",
+        "total_sessions_30d",
+        "avg_events_per_session",
+        "total_spend_7d",
+        "total_spend_30d",
+        "total_spend_lifetime",
+        "avg_order_value",
+        "max_single_purchase",
+        "view_to_cart_ratio",
+        "cart_to_purchase_ratio",
+        "avg_session_duration_minutes",
+        "avg_time_between_sessions_hours",
+        "weekend_event_share",
+        "evening_event_share"
+      ],
+      "C": [
+        "days_since_last_event",
+        "days_since_last_purchase",
+        "days_since_last_cart_add",
+        "total_events_7d",
+        "total_events_30d",
+        "total_events_lifetime",
+        "total_purchases_7d",
+        "total_purchases_30d",
+        "total_sessions_7d",
+        "total_sessions_30d",
+        "avg_events_per_session",
+        "total_spend_7d",
+        "total_spend_30d",
+        "total_spend_lifetime",
+        "avg_order_value",
+        "max_single_purchase",
+        "num_apps_used",
+        "app_entropy",
+        "dominant_app_share",
+        "cross_app_comparison_count",
+        "informed_purchase_count",
+        "chose_cheaper_app_rate",
+        "avg_abs_price_gap_pct"
+      ],
+      "D": [
+        "days_since_last_event",
+        "days_since_last_purchase",
+        "days_since_last_cart_add",
+        "total_events_7d",
+        "total_events_30d",
+        "total_events_lifetime",
+        "total_purchases_7d",
+        "total_purchases_30d",
+        "total_sessions_7d",
+        "total_sessions_30d",
+        "avg_events_per_session",
+        "total_spend_7d",
+        "total_spend_30d",
+        "total_spend_lifetime",
+        "avg_order_value",
+        "max_single_purchase",
+        "view_to_cart_ratio",
+        "cart_to_purchase_ratio",
+        "avg_session_duration_minutes",
+        "avg_time_between_sessions_hours",
+        "weekend_event_share",
+        "evening_event_share",
+        "num_apps_used",
+        "app_entropy",
+        "dominant_app_share",
+        "cross_app_comparison_count",
+        "informed_purchase_count",
+        "chose_cheaper_app_rate",
+        "avg_abs_price_gap_pct",
+        "avg_discount_pct_on_purchases",
+        "pct_purchases_with_discount",
+        "price_range_browsed",
+        "category_diversity"
+      ]
+    },
+    "aggregate": {
+      "will_purchase_next_7d": {
+        "roc_auc": {
+          "A": {
+            "mean": 0.8740035302757683,
+            "std": 0.020843584239237482,
+            "min": 0.8454647435897437,
+            "max": 0.8897461863657553,
+            "n": 5
+          },
+          "B": {
+            "mean": 0.8766938711318168,
+            "std": 0.019980618568578055,
+            "min": 0.8488621794871796,
+            "max": 0.8918269230769229,
+            "n": 5
+          },
+          "C": {
+            "mean": 0.8728301720307476,
+            "std": 0.021257636326624033,
+            "min": 0.8443108974358975,
+            "max": 0.8894729227950042,
+            "n": 5
+          },
+          "D": {
+            "mean": 0.8757337815821715,
+            "std": 0.020254186719144186,
+            "min": 0.8492948717948718,
+            "max": 0.8907211538461538,
+            "n": 5
+          }
+        },
+        "deltas": {
+          "B-A": {
+            "mean": 0.0026903408560485565,
+            "std": 0.0011590308449124832,
+            "min": 0.0012961866508777176,
+            "max": 0.004073385079222724,
+            "n": 5,
+            "seeds_ci_excludes_zero": 0
+          },
+          "C-A": {
+            "mean": -0.0011733582450208057,
+            "std": 0.0007633043021663653,
+            "min": -0.0022772467765731497,
+            "max": -0.0002732635707510811,
+            "n": 5,
+            "seeds_ci_excludes_zero": 0
+          },
+          "D-A": {
+            "mean": 0.001730251306403141,
+            "std": 0.0014924031594143322,
+            "min": 0.0001768176046035297,
+            "max": 0.0038301282051281804,
+            "n": 5,
+            "seeds_ci_excludes_zero": 0
+          }
+        }
+      },
+      "switched_given_purchase": {
+        "roc_auc": {
+          "A": {
+            "mean": 0.6231180119740778,
+            "std": 0.06451458794573386,
+            "min": 0.5683249983763071,
+            "max": 0.733293172690763,
+            "n": 5
+          },
+          "B": {
+            "mean": 0.6662406613160596,
+            "std": 0.05008282604395092,
+            "min": 0.6288562707020848,
+            "max": 0.751004016064257,
+            "n": 5
+          },
+          "C": {
+            "mean": 0.7041259650886159,
+            "std": 0.03619257939196514,
+            "min": 0.6543047326457464,
+            "max": 0.7361445783132531,
+            "n": 5
+          },
+          "D": {
+            "mean": 0.7131199840923015,
+            "std": 0.028849698031709663,
+            "min": 0.6802721088435374,
+            "max": 0.7533333333333333,
+            "n": 5
+          }
+        },
+        "deltas": {
+          "B-A": {
+            "mean": 0.043122649341981886,
+            "std": 0.015854477881644482,
+            "min": 0.017710843373494045,
+            "max": 0.06053127232577771,
+            "n": 5,
+            "seeds_ci_excludes_zero": 1
+          },
+          "C-A": {
+            "mean": 0.0810079531145382,
+            "std": 0.059249395689925675,
+            "min": 0.0028514056224900886,
+            "max": 0.1480537862703467,
+            "n": 5,
+            "seeds_ci_excludes_zero": 3
+          },
+          "D-A": {
+            "mean": 0.09000197211822372,
+            "std": 0.04873731446350423,
+            "min": 0.020040160642570304,
+            "max": 0.14062278839348896,
+            "n": 5,
+            "seeds_ci_excludes_zero": 3
+          }
+        }
+      }
+    },
+    "per_seed": {
+      "1": {
+        "will_purchase_next_7d": {
+          "n_train": 2500,
+          "n_test": 500,
+          "test_positive_rate": 0.524,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.8579286676502661,
+              "ci_lo": 0.8216816455925132,
+              "ci_hi": 0.887827585524213
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.8620020527294888,
+              "ci_lo": 0.829173517982398,
+              "ci_hi": 0.8912049781160555
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.855651420873693,
+              "ci_lo": 0.8192315517612301,
+              "ci_hi": 0.8864988158704559
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.8583616652767978,
+              "ci_lo": 0.824903771432237,
+              "ci_hi": 0.8875600507134648
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.004073385079222724,
+              "lo": -0.004035995736709583,
+              "hi": 0.013061386595319458
+            },
+            "C-A": {
+              "delta": -0.0022772467765731497,
+              "lo": -0.011020498366437436,
+              "hi": 0.006194035530748998
+            },
+            "D-A": {
+              "delta": 0.0004329976265317059,
+              "lo": -0.009471977079116935,
+              "hi": 0.011520771529147019
+            }
+          }
+        },
+        "switched_given_purchase": {
+          "n_train": 1367,
+          "n_test": 262,
+          "test_positive_rate": 0.6603053435114504,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.5683249983763071,
+              "ci_lo": 0.4974769941422784,
+              "ci_hi": 0.6315114580911416
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.6288562707020848,
+              "ci_lo": 0.5528970614714063,
+              "ci_hi": 0.6972169881639718
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.6790933298694551,
+              "ci_lo": 0.6090123290584645,
+              "ci_hi": 0.7441385649520117
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.6927648243164253,
+              "ci_lo": 0.6206331780570578,
+              "ci_hi": 0.7604873054143947
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.06053127232577771,
+              "lo": -0.0005158715739100104,
+              "hi": 0.12744399644081175
+            },
+            "C-A": {
+              "delta": 0.11076833149314802,
+              "lo": 0.040668861965466346,
+              "hi": 0.19353591270485587
+            },
+            "D-A": {
+              "delta": 0.12443982594011815,
+              "lo": 0.05069297202910556,
+              "hi": 0.20089003761309066
+            }
+          }
+        }
+      },
+      "2": {
+        "will_purchase_next_7d": {
+          "n_train": 2500,
+          "n_test": 500,
+          "test_positive_rate": 0.466,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.8897461863657553,
+              "ci_lo": 0.8599919485540132,
+              "ci_hi": 0.9154864614300756
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.8914661394287183,
+              "ci_lo": 0.8617077366862248,
+              "ci_hi": 0.9165541695498904
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.8894729227950042,
+              "ci_lo": 0.8609660339731725,
+              "ci_hi": 0.9139810846795492
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.8899230039703588,
+              "ci_lo": 0.8618532362546814,
+              "ci_hi": 0.9148998820010471
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.00171995306296302,
+              "lo": -0.007838481011134093,
+              "hi": 0.00980361760149484
+            },
+            "C-A": {
+              "delta": -0.0002732635707510811,
+              "lo": -0.00822163773751366,
+              "hi": 0.0077603090096965595
+            },
+            "D-A": {
+              "delta": 0.0001768176046035297,
+              "lo": -0.012229854786575678,
+              "hi": 0.01206363339884589
+            }
+          }
+        },
+        "switched_given_purchase": {
+          "n_train": 1383,
+          "n_test": 233,
+          "test_positive_rate": 0.6437768240343348,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.733293172690763,
+              "ci_lo": 0.6637417099786478,
+              "ci_hi": 0.7928208089923487
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.751004016064257,
+              "ci_lo": 0.6823178485459007,
+              "ci_hi": 0.8167940236602208
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.7361445783132531,
+              "ci_lo": 0.6724347586047448,
+              "ci_hi": 0.8026967541719979
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.7533333333333333,
+              "ci_lo": 0.6907268375079324,
+              "ci_hi": 0.8187901441984069
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.017710843373494045,
+              "lo": -0.035193912016993595,
+              "hi": 0.07012788445604431
+            },
+            "C-A": {
+              "delta": 0.0028514056224900886,
+              "lo": -0.06067865659777428,
+              "hi": 0.08276819175792924
+            },
+            "D-A": {
+              "delta": 0.020040160642570304,
+              "lo": -0.04195211591510088,
+              "hi": 0.09521029085053907
+            }
+          }
+        }
+      },
+      "3": {
+        "will_purchase_next_7d": {
+          "n_train": 2500,
+          "n_test": 500,
+          "test_positive_rate": 0.52,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.8454647435897437,
+              "ci_lo": 0.8115599684850592,
+              "ci_hi": 0.8752040721653987
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.8488621794871796,
+              "ci_lo": 0.8170758102707165,
+              "ci_hi": 0.8782896437875307
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.8443108974358975,
+              "ci_lo": 0.8106432318181818,
+              "ci_hi": 0.8756288732018794
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.8492948717948718,
+              "ci_lo": 0.8161626876627843,
+              "ci_hi": 0.8784900162398975
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.0033974358974359076,
+              "lo": -0.006589838312806223,
+              "hi": 0.012415849332054136
+            },
+            "C-A": {
+              "delta": -0.001153846153846172,
+              "lo": -0.011199999999999988,
+              "hi": 0.008043323752072482
+            },
+            "D-A": {
+              "delta": 0.0038301282051281804,
+              "lo": -0.007337054121286481,
+              "hi": 0.01392627307692302
+            }
+          }
+        },
+        "switched_given_purchase": {
+          "n_train": 1432,
+          "n_test": 260,
+          "test_positive_rate": 0.6615384615384615,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.6096723044397463,
+              "ci_lo": 0.5341455324666669,
+              "ci_hi": 0.6810537626051217
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.6597515856236786,
+              "ci_lo": 0.589105427099112,
+              "ci_hi": 0.7307429721973766
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.7158430232558141,
+              "ci_lo": 0.6530447116126294,
+              "ci_hi": 0.7818018386732474
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.711416490486258,
+              "ci_lo": 0.6399098568846393,
+              "ci_hi": 0.7810696519912312
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.050079281183932345,
+              "lo": 0.006201870650769834,
+              "hi": 0.09599882948444667
+            },
+            "C-A": {
+              "delta": 0.10617071881606777,
+              "lo": 0.044220769368698364,
+              "hi": 0.159843379713755
+            },
+            "D-A": {
+              "delta": 0.1017441860465117,
+              "lo": 0.04091056782860654,
+              "hi": 0.1623097370426828
+            }
+          }
+        }
+      },
+      "4": {
+        "will_purchase_next_7d": {
+          "n_train": 2500,
+          "n_test": 500,
+          "test_positive_rate": 0.494,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.8880158742858972,
+              "ci_lo": 0.85978411005705,
+              "ci_hi": 0.9137951935031637
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.889312060936775,
+              "ci_lo": 0.8613983461808307,
+              "ci_hi": 0.9147043603201817
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.8873117728952968,
+              "ci_lo": 0.8589537903021816,
+              "ci_hi": 0.9135831559744603
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.8903682130226752,
+              "ci_lo": 0.8613356647737628,
+              "ci_hi": 0.9159871148431893
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.0012961866508777176,
+              "lo": -0.006876092666279312,
+              "hi": 0.008802857373626991
+            },
+            "C-A": {
+              "delta": -0.0007041013906003979,
+              "lo": -0.006465543581057434,
+              "hi": 0.005158225922023787
+            },
+            "D-A": {
+              "delta": 0.0023523387367779813,
+              "lo": -0.006676413293770133,
+              "hi": 0.010426508195471564
+            }
+          }
+        },
+        "switched_given_purchase": {
+          "n_train": 1448,
+          "n_test": 247,
+          "test_positive_rate": 0.6356275303643725,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.5871903750884643,
+              "ci_lo": 0.5096689276324856,
+              "ci_hi": 0.6622312100134631
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.6288747346072185,
+              "ci_lo": 0.56419443845003,
+              "ci_hi": 0.7027360236785772
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.735244161358811,
+              "ci_lo": 0.6689191843500574,
+              "ci_hi": 0.8000906323706409
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.7278131634819532,
+              "ci_lo": 0.6604730095913621,
+              "ci_hi": 0.7952944291820434
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.041684359518754266,
+              "lo": -0.016842443163133995,
+              "hi": 0.10615426422226518
+            },
+            "C-A": {
+              "delta": 0.1480537862703467,
+              "lo": 0.07829680587369378,
+              "hi": 0.22356305794387654
+            },
+            "D-A": {
+              "delta": 0.14062278839348896,
+              "lo": 0.07010168302945302,
+              "hi": 0.21714751280557468
+            }
+          }
+        }
+      },
+      "5": {
+        "will_purchase_next_7d": {
+          "n_train": 2500,
+          "n_test": 500,
+          "test_positive_rate": 0.48,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.8888621794871795,
+              "ci_lo": 0.8614393133407829,
+              "ci_hi": 0.9136159189439595
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.8918269230769229,
+              "ci_lo": 0.8638944542124541,
+              "ci_hi": 0.917203408934949
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.8874038461538463,
+              "ci_lo": 0.8580669454680224,
+              "ci_hi": 0.9128135280364567
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.8907211538461538,
+              "ci_lo": 0.8641058946938184,
+              "ci_hi": 0.9176406686313451
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.0029647435897434127,
+              "lo": -0.0053706934786278745,
+              "hi": 0.009734864600978475
+            },
+            "C-A": {
+              "delta": -0.0014583333333332282,
+              "lo": -0.008284172820643417,
+              "hi": 0.0043220049141187026
+            },
+            "D-A": {
+              "delta": 0.001858974358974308,
+              "lo": -0.007582790128962427,
+              "hi": 0.01067188196185806
+            }
+          }
+        },
+        "switched_given_purchase": {
+          "n_train": 1381,
+          "n_test": 240,
+          "test_positive_rate": 0.6125,
+          "models": {
+            "A": {
+              "n_features": 16,
+              "roc_auc": 0.6171092092751079,
+              "ci_lo": 0.5447802869567834,
+              "ci_hi": 0.6846385290181486
+            },
+            "B": {
+              "n_features": 22,
+              "roc_auc": 0.662716699583059,
+              "ci_lo": 0.5921484210461565,
+              "ci_hi": 0.7316938277863099
+            },
+            "C": {
+              "n_features": 23,
+              "roc_auc": 0.6543047326457464,
+              "ci_lo": 0.5849091384122646,
+              "ci_hi": 0.7202539279346812
+            },
+            "D": {
+              "n_features": 33,
+              "roc_auc": 0.6802721088435374,
+              "ci_lo": 0.6110324130631877,
+              "ci_hi": 0.7493011787990688
+            }
+          },
+          "deltas": {
+            "B-A": {
+              "delta": 0.04560749030795108,
+              "lo": -0.01575605067362189,
+              "hi": 0.10705266955266947
+            },
+            "C-A": {
+              "delta": 0.03719552337063847,
+              "lo": -0.031408731817856035,
+              "hi": 0.10539099429043641
+            },
+            "D-A": {
+              "delta": 0.06316289956842946,
+              "lo": -0.010958419363451915,
+              "hi": 0.12814267723688
+            }
+          }
+        }
+      }
+    },
+    "retailrocket": {
+      "dates": {
+        "train_refs": [
+          "2015-08-24 00:00:00",
+          "2015-08-31 00:00:00"
+        ],
+        "test_ref": "2015-09-07 00:00:00",
+        "weeks_shifted": 0
+      },
+      "target": "will_purchase_next_7d",
+      "n_train": 12352,
+      "n_test": 6419,
+      "test_positive_rate": 0.009035675338837826,
+      "models": {
+        "A": {
+          "n_features": 16,
+          "roc_auc": 0.8387913416346379,
+          "ci_lo": 0.7583701662163752,
+          "ci_hi": 0.9086161024944012
+        },
+        "B": {
+          "n_features": 22,
+          "roc_auc": 0.7775994882609002,
+          "ci_lo": 0.686342461541922,
+          "ci_hi": 0.8515458658402851
+        },
+        "D_without_cross_app": {
+          "n_features": 26,
+          "roc_auc": 0.7619112154345716,
+          "ci_lo": 0.6817810387760325,
+          "ci_hi": 0.8411754516550137
+        }
+      },
+      "deltas": {
+        "B-A": {
+          "delta": -0.06119185337373767,
+          "lo": -0.1388705831782745,
+          "hi": 0.01830953443833336
+        },
+        "D_without_cross_app-A": {
+          "delta": -0.07688012620006623,
+          "lo": -0.17681361663703335,
+          "hi": 0.01837972301497145
+        }
+      }
+    }
+  },
+  "tripwire_notes": []
+}

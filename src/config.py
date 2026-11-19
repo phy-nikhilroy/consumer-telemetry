@@ -131,6 +131,27 @@ CROSS_APP_PRICE_LOOKBACK_HOURS = 24
 MISSING_AS_SENTINEL_FEATURES = {"chose_cheaper_app_rate": -1.0, "avg_abs_price_gap_pct": -1.0}
 RANDOM_SEED = 42
 
+# Feature blocks for the ablation study (v1.4). Every candidate feature belongs to exactly one block.
+FEATURE_BLOCKS = {
+    "rfm": [
+        "days_since_last_event", "days_since_last_purchase", "days_since_last_cart_add",
+        "total_events_7d", "total_events_30d", "total_events_lifetime",
+        "total_purchases_7d", "total_purchases_30d", "total_sessions_7d", "total_sessions_30d",
+        "avg_events_per_session", "total_spend_7d", "total_spend_30d", "total_spend_lifetime",
+        "avg_order_value", "max_single_purchase",
+    ],
+    "funnel": [
+        "view_to_cart_ratio", "cart_to_purchase_ratio", "avg_session_duration_minutes",
+        "avg_time_between_sessions_hours", "weekend_event_share", "evening_event_share",
+    ],
+    "cross_app": [
+        "num_apps_used", "app_entropy", "dominant_app_share", "cross_app_comparison_count",
+        "informed_purchase_count", "chose_cheaper_app_rate", "avg_abs_price_gap_pct",
+    ],
+    "price": ["avg_discount_pct_on_purchases", "pct_purchases_with_discount", "price_range_browsed"],
+    "category": ["category_diversity"],
+}
+
 # Serving. The API writes live events into its own copy of the warehouse so that demo
 # traffic can never leak into the batch warehouse the models are trained from. On first
 # start the serving copy is cloned from DEFAULT_DB_PATH, or simulated if that is absent.
