@@ -15,13 +15,13 @@ from typing import Iterator
 
 import pytest
 
-TINY_USERS = 24
+TINY_USERS = 40
 TINY_DAYS = 30
 
 
 @pytest.fixture(scope="session")
 def tiny_warehouse(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A sessionized, simulated warehouse of 24 users over 30 days."""
+    """A sessionized, simulated warehouse of 40 users over 30 days."""
     from src.api.warehouse import ensure_serving_warehouse
 
     directory = tmp_path_factory.mktemp("tiny_warehouse")

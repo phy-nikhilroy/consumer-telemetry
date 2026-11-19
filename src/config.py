@@ -133,8 +133,8 @@ RANDOM_SEED = 42
 # traffic can never leak into the batch warehouse the models are trained from. On first
 # start the serving copy is cloned from DEFAULT_DB_PATH, or simulated if that is absent.
 SERVING_DB_PATH = PROCESSED_DATA_DIR / "serving.duckdb"
-SERVING_SIMULATION_USERS = 400
-SERVING_SIMULATION_DAYS = 30
+SERVING_SIMULATION_USERS = 300
+SERVING_SIMULATION_DAYS = 45
 # Purchase probability bands reported as risk_segment. The test-set base rate is about
 # 40 percent; at or above 0.6 the top deciles bought at roughly twice that rate, and
 # below 0.3 almost nobody bought (see propensity_evaluation_summary.json).

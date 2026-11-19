@@ -536,3 +536,58 @@ def events_to_frames(events: Sequence[Dict[str, Any]]) -> Tuple[pl.DataFrame, pl
         {c: [e[c] for e in ordered] for c in schema}, schema=schema
     )
     return frame.select(RAW_COLUMNS), frame.select(TRUTH_COLUMNS)
+
+
+_PROFILE_FIELDS = (
+    "user_id", "archetype", "primary_app", "activity_level", "buy_propensity",
+    "price_sensitivity", "loyalty_jitter", "price_tier",
+)
+
+
+def profiles_frame(profiles: Sequence[UserProfile], states: Dict[str, UserState]) -> pl.DataFrame:
+    """
+    One row per profile with every `UserProfile` field and every `UserState` field. The profile's
+    `archetype` keeps its name; the state's is `state_archetype` (it differs after drift). The two
+    dict fields are JSON strings. Read back with `read_profiles`.
+    """
+    import json
+
+    rows: List[Dict[str, Any]] = []
+    for p in profiles:
+        s = states[p.user_id]
+        row = {name: getattr(p, name) for name in _PROFILE_FIELDS}
+        row["category_weights"] = json.dumps(p.category_weights)
+        row.update(
+            origin=s.origin, state_archetype=s.archetype, next_day=s.next_day,
+            churned_day=s.churned_day, event_seq=s.event_seq, session_seq=s.session_seq,
+            recent_views=json.dumps(s.recent_views),
+        )
+        rows.append(row)
+    schema = {
+        "user_id": pl.Utf8, "archetype": pl.Utf8, "primary_app": pl.Utf8,
+        "activity_level": pl.Float64, "buy_propensity": pl.Float64,
+        "price_sensitivity": pl.Float64, "loyalty_jitter": pl.Float64, "price_tier": pl.Utf8,
+        "category_weights": pl.Utf8, "origin": pl.Datetime("us"), "state_archetype": pl.Utf8,
+        "next_day": pl.Int64, "churned_day": pl.Int64, "event_seq": pl.Int64,
+        "session_seq": pl.Int64, "recent_views": pl.Utf8,
+    }
+    return pl.DataFrame(rows, schema=schema)
+
+
+def read_profiles(path: Any) -> Tuple[List[UserProfile], Dict[str, UserState]]:
+    """Reads a `profiles_frame` parquet back into profiles and per-user end states."""
+    import json
+
+    profiles: List[UserProfile] = []
+    states: Dict[str, UserState] = {}
+    for r in pl.read_parquet(path).iter_rows(named=True):
+        profiles.append(UserProfile(
+            **{name: r[name] for name in _PROFILE_FIELDS},
+            category_weights=json.loads(r["category_weights"]),
+        ))
+        states[r["user_id"]] = UserState(
+            origin=r["origin"], archetype=r["state_archetype"], next_day=r["next_day"],
+            churned_day=r["churned_day"], event_seq=r["event_seq"], session_seq=r["session_seq"],
+            recent_views=json.loads(r["recent_views"]),
+        )
+    return profiles, states

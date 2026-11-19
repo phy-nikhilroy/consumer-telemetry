@@ -44,6 +44,7 @@ from src.simulation.behavior import (
     BehaviorEngine,
     UserProfile,
     events_to_frames,
+    profiles_frame,
     sku_key,
 )
 from src.simulation.pricebook import PriceBook
@@ -52,7 +53,7 @@ RAW_EVENT_COLUMNS = RAW_COLUMNS
 DEFAULT_OUTPUT_PARQUET = "data/processed/simulated_events.parquet"
 
 __all__ = [
-    "APPS", "ARCHETYPES", "RAW_EVENT_COLUMNS", "TRUTH_COLUMNS", "build_engine", "default_truth_path",
+    "APPS", "ARCHETYPES", "RAW_EVENT_COLUMNS", "TRUTH_COLUMNS", "build_engine", "default_profiles_path", "default_truth_path",
     "reload_duckdb_warehouse", "run_simulation", "simulate_events_dataset", "sku_key", "split_events",
 ]
 
@@ -83,9 +84,18 @@ def simulate_events_dataset(
     and the profiles. `split_events` separates raw events from truth.
     """
     start = _naive(start_date) if start_date is not None else datetime.fromisoformat(SIMULATION_START)
+    events, profiles, _ = _simulate_with_states(num_users, days, seed, start, ocr_noise, price_beta)
+    return events, profiles
+
+
+def _simulate_with_states(
+    num_users: int, days: int, seed: int, start: datetime, ocr_noise: float, price_beta: float,
+) -> Tuple[List[Dict[str, Any]], List[UserProfile], Dict[str, Any]]:
+    """Events, profiles and the engine's end-of-simulation user states."""
     engine = build_engine(days=days, seed=seed, ocr_noise=ocr_noise, price_beta=price_beta)
     profiles = engine.create_profiles(num_users)
-    return engine.simulate_events(profiles, start, days), profiles
+    events = engine.simulate_events(profiles, start, days)
+    return events, profiles, dict(engine.states)
 
 
 def _naive(value: datetime) -> datetime:
@@ -147,6 +157,11 @@ def default_truth_path(output_parquet: Union[str, Path]) -> Path:
     return out.with_name(f"{out.stem}_truth.parquet")
 
 
+def default_profiles_path(db_path: Union[str, Path], truth_path: Union[str, Path]) -> Path:
+    """The profiles file: `<db stem>_profiles.parquet` in the truth file's directory."""
+    return Path(truth_path).parent / f"{Path(db_path).stem}_profiles.parquet"
+
+
 def run_simulation(
     num_users: int = SIMULATION_USERS,
     days: int = SIMULATION_DAYS,
@@ -165,8 +180,8 @@ def run_simulation(
     """
     print(f"Simulating {num_users} users over {days} days (seed {seed}, OCR noise {ocr_noise}, "
           f"price beta {price_beta})...")
-    events, profiles = simulate_events_dataset(num_users=num_users, days=days, seed=seed,
-                                               ocr_noise=ocr_noise, price_beta=price_beta)
+    events, profiles, states = _simulate_with_states(
+        num_users, days, seed, datetime.fromisoformat(SIMULATION_START), ocr_noise, price_beta)
     print(f"Generated {len(events)} events.")
 
     raw, truth = split_events(events)
@@ -175,6 +190,8 @@ def run_simulation(
     raw.write_parquet(out_path)
     truth_path = Path(truth_parquet) if truth_parquet else default_truth_path(out_path)
     truth.write_parquet(truth_path)
+    profiles_path = default_profiles_path(db_path or DEFAULT_DB_PATH, truth_path)
+    profiles_frame(profiles, states).write_parquet(profiles_path)
     print(f"Saved raw events to {out_path} and ground truth to {truth_path} ({raw.height} rows).")
 
     counts = reload_duckdb_warehouse(events, profiles, db_path=db_path, workers=workers)
@@ -186,6 +203,7 @@ def run_simulation(
         "total_events": len(events),
         "parquet_path": str(out_path),
         "truth_path": str(truth_path),
+        "profiles_path": str(profiles_path),
         "warehouse_counts": counts,
     }
 
