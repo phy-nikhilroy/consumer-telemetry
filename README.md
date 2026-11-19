@@ -5,9 +5,12 @@ into structured product events, stores them in an analytical warehouse, engineer
 behavioral features, trains models that predict what each shopper will do next, and serves
 those predictions live through an API and a dashboard.
 
-**Status:** version 1.0 is complete. Extraction, feature engineering, modeling, and the serving
-layer (API, live event stream, dashboard, Docker images and Compose stack) are built, tested with
-895 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
+**Status:** release v1.4 (`v1.4-simulation`) is complete, on the way to v2.0. Version 1.0 built the
+pipeline end to end: extraction, feature engineering, modeling, and the serving layer (API, live event
+stream, dashboard, Docker images and Compose stack), deployed locally with Docker. v1.1 to v1.4 made the
+evaluation honest, measured extraction on unseen real listings, rebuilt the warehouse from extracted
+screens, and replaced the simulator with a behaviour engine whose causes are kept as ground truth. 895
+tests pass. Public hosting is deferred to future work.
 See [Project Status](#project-status), [Deployment](#deployment), and [Future Work](#future-work).
 
 ---
@@ -124,18 +127,23 @@ The system has three offline stages and one online layer.
   (MRP), discount, rating, review count, and the user's action (view, add to cart, buy).
 - **spaCy** for the brand and the product title. A known-brand list handles common brands, and
   an open-vocabulary path handles brands the list has never seen.
-- **Sentence embeddings with a FAISS index** to place the product in a category tree, for example
-  `Electronics > Smartphones`. If nothing in the tree is similar enough, the product is labeled
-  `Unknown` instead of being forced into the wrong category.
+- **A supervised taxonomy model** (sentence embeddings and a logistic regression trained on real
+  Amazon product types) to place the product in a category such as
+  `Cell Phones & Accessories > Cell Phones`. Below a probability of 0.6 it abstains, and an
+  embedding-similarity prototype answers instead, or `Unknown` when nothing is similar enough.
 - **Entity resolution** so that the same phone listed slightly differently on two apps gets one
-  shared product ID. Without this, cross-app comparison would be impossible.
+  shared product ID. The matcher combines name embeddings and model tokens, vetoes different brands,
+  capacities, and variants, and tolerates OCR spacing and one-character noise. Without this,
+  cross-app comparison would be impossible.
 
-The result is a validated Pydantic record with a confidence score based on how much evidence
-supports each field.
+A screen that shows several listings is first split into one segment per listing. The result is a
+validated Pydantic record with a confidence score from a calibrated model that predicts whether the
+record is correct.
 
 **2. Warehouse and features.** Events land in a DuckDB star schema. Events are grouped into
 sessions (a gap of 30 minutes or more starts a new session), and the pipeline detects when a user
-looks at the same product on more than one app within an hour. Per-user features are then
+looks at the same product on more than one app within 30 minutes. Both values were chosen by scoring
+the detectors against the simulator's ground truth (`reports/v1_4_detectors.json`). Per-user features are then
 computed in two blocks:
 
 - **RFM**: how **R**ecently a user did something, how **F**requently, and how much **M**oney
@@ -189,7 +197,10 @@ real datasets. See [Real-World Validation](#real-world-validation).
 | 3. Models | Propensity, calibration and lift, app switching with SHAP, CLV, segmentation, executive evaluation report, expanded test suite | Complete | `v0.3-models-complete` |
 | Validation | Full pipeline run against real Amazon listings and the RetailRocket clickstream; defects found and fixed | Complete | included in `main` |
 | 4. Serving | FastAPI ingestion and prediction endpoints, live event stream and monitor, Streamlit dashboard, Docker images and Compose stack, local deployment, end-to-end tests, latency benchmarks | Complete | `v1.0-complete` |
-| 5. Simulation realism (v1.4) | Seeded price book per SKU and app, per-user behaviour profiles, sessionizer and comparison detectors validated on held-out seeds, planted price-effect experiment, feature-block ablation, learning curve, simulator calibration against RetailRocket | Complete | `v1.4-simulation` |
+| v1.1 Honest evaluation | Disjoint train and test windows with a validator, grouped validation and calibration, per-target feature lists, baselines and bootstrap intervals, conditional switching, CLV holdout validation, archetype-validated segmentation, a 5-seed harness, the RetailRocket grid | Complete | `v1.1-evaluation` |
+| v1.2 Extraction on unseen data | Multi-listing screens and a segmenter, a 303-SKU family catalog, wording-tolerant matching, a supervised taxonomy with abstention, learned confidence, batch extraction, a benchmark on held-out real listings | Complete | `v1.2-extraction` |
+| v1.3 Extraction-driven warehouse | Schema v2, one loader that extracts every raw screen for batch and serving, bidirectional comparisons, re-extraction, data checks, price features from stored values, OCR-tolerant matching, a noise propagation experiment | Complete | `v1.3-warehouse` |
+| v1.4 Behaviour engine | Seeded price book per SKU and app, per-user behaviour profiles, sessionizer and comparison detectors validated on held-out seeds, planted price-effect experiment, feature-block ablation, learning curve, simulator calibration against RetailRocket | Complete | `v1.4-simulation` |
 | Future | Deeper simulation, consumer behavior analysis, statistics, and modeling; public hosting | Planned | see [Future Work](#future-work) |
 
 ---
@@ -237,8 +248,11 @@ consumer-telemetry/
 │   ├── features/              # Phase 2: warehouse, sessionization, features, feature store
 │   ├── models/                # Phase 3: models, evaluation, and saved artifacts/
 │   ├── api/                   # Phase 4: FastAPI service, serving warehouse, live scoring
-│   ├── simulation/            # Phase 4: live event stream and terminal monitor
+│   ├── simulation/            # Behaviour engine, price book, calibration; live stream and monitor
+│   ├── experiments/           # Isolated multi-seed, real-data, and ground-truth experiments
+│   ├── release/               # Release gates and the versioned report writer
 │   └── dashboard/             # Phase 4: Streamlit dashboard
+├── reports/                   # Committed versioned JSON reports (v1_1_*.json to v1_4_*.json)
 ├── notebooks/                 # Executed analysis notebooks and the HTML evaluation report
 └── tests/                     # 65 test modules, 895 tests
 ```
@@ -252,10 +266,10 @@ consumer-telemetry/
 | `synthetic_data.py` | Generates noisy, OCR-style screen dumps from a product catalog |
 | `regex_extractor.py` | Extracts price, currency, discount, rating, review count, and user action |
 | `ner_extractor.py` | Finds the brand and product title with spaCy; `extract_all()` combines the extractors |
-| `taxonomy_classifier.py` | Assigns a category with embeddings and FAISS, or abstains with `Unknown` |
+| `taxonomy_classifier.py` | Supervised category model with calibrated abstention; an embedding prototype (FAISS) answers when it abstains, or `Unknown` |
 | `entity_resolver.py` | Merges listings of the same product across apps into one canonical ID |
 | `pipeline.py` | `process(raw_text)` runs everything above and returns a validated `ExtractedProduct` |
-| `simulate_users.py` | Simulates multi-day, multi-app shoppers and reloads the warehouse |
+| `simulate_users.py` | Command line front end of the behaviour engine: simulates, writes raw screens, truth, and profiles, and loads the warehouse |
 | `real_data_benchmark.py` | Scores extraction against real Amazon product listings |
 | `retailrocket_adapter.py` | Maps the RetailRocket clickstream onto this project's warehouse schema |
 | `catalog.py` | Expands 46 hand-authored product families into a larger SKU catalog with variants |
@@ -267,15 +281,20 @@ consumer-telemetry/
 | `confidence_model.py` | Learned extraction confidence, with expected calibration error and AUC |
 | `extraction_benchmark.py` | Throughput of `process` against `process_batch` |
 | `amazon_jsonl_shard.py` | Converts the Amazon Clothing JSONL metadata into a parquet shard |
+| `reextract.py` | Rebuilds every extracted table from `raw_events`, then re-sessionizes |
+| `load_benchmark.py` | Times a default-size load and writes `reports/v1_3_load.json` |
 
 **`src/features/`**
 
 | Module | What it does |
 | :--- | :--- |
-| `schema.sql` | Star schema: `fact_events`, `dim_products`, `dim_users`, `fact_cross_app_comparisons` |
+| `schema.sql` | Schema v2: `raw_events`, `fact_events`, `fact_price_observations`, `dim_products`, `product_aliases`, `dim_users`, `fact_cross_app_comparisons`, `schema_info` |
+| `migrations.py` | Idempotent upgrade of any warehouse to schema v2 |
+| `event_loader.py` | The single write path for batch loads and live ingest, with extraction on every raw screen |
+| `data_checks.py` | Warehouse integrity checks; the command line exits 1 on any failure |
 | `database.py` | `DatabaseManager` and the `get_db_session()` context manager |
 | `loader.py` | Loads extracted products into the warehouse |
-| `sessionizer.py` | 30-minute sessionization and cross-app comparison detection |
+| `sessionizer.py` | Sessions split at 30 minutes of inactivity, and cross-app comparisons inside a 30-minute window in either app order |
 | `rfm_features.py` | Recency, frequency, and monetary features |
 | `behavioral_features.py` | App entropy, cross-app behavior, funnel ratios, price sensitivity, timing |
 | `feature_store.py` | Joins feature blocks, builds forward-looking targets, writes train and test splits |
@@ -290,6 +309,9 @@ consumer-telemetry/
 | `switching.py` | App switching classifier (binary and three-class) with SHAP explanations |
 | `clv.py` | BG/NBD and Gamma-Gamma customer lifetime value |
 | `segmentation.py` | KMeans and HDBSCAN segmentation with named segment profiles |
+| `calibration.py` | Group-safe calibration of propensity scores and the published risk bands |
+| `baselines.py` | Single-feature and logistic baselines and bootstrap intervals for model metrics |
+| `clv_validation.py` | CLV checked on a holdout window against naive baselines |
 
 **`src/api/`**
 
@@ -307,6 +329,28 @@ consumer-telemetry/
 | :--- | :--- |
 | `stream_generator.py` | Sends a realistic screen-text event to `POST /ingest` every few seconds |
 | `monitor.py` | Prints one line of live activity from the API at a fixed interval |
+| `behavior.py` | The behaviour engine: shopper profiles, sessions, funnel, comparisons, drift, churn, and ground truth |
+| `pricebook.py` | Seeded per-product, per-app prices with promotion episodes |
+| `calibrate.py` | Compares the simulated warehouse with RetailRocket; writes `reports/v1_4_sim_calibration.json` |
+
+**`src/experiments/`**
+
+| Module | What it does |
+| :--- | :--- |
+| `run_seeds.py` | Runs the simulation and model chain for several seeds and reports mean and spread |
+| `retailrocket_protocol.py` | Real-data early-stopping grid on a disjoint split |
+| `noise_propagation.py` | How OCR noise in extraction propagates into the propensity model |
+| `detector_validation.py` | Scores the sessionizer and comparison detector against ground truth |
+| `price_effect.py` | Recovers a planted price effect from the extracted warehouse |
+| `ablation.py` | Feature-block ablation over five seeds and RetailRocket |
+| `learning_curve.py` | Propensity and switching performance at 250 to 2,000 users |
+
+**`src/release/`**
+
+| Module | What it does |
+| :--- | :--- |
+| `gates.py` | Release gates; `--version <X>` or `--version all` exits non-zero on any failure |
+| `reporting.py` | Writes versioned JSON reports under `reports/` |
 
 **`src/dashboard/`**
 
@@ -439,7 +483,7 @@ The stages run in a fixed order, and each one reads the output of the previous o
 
 | Step | Command | Produces |
 | :--- | :--- | :--- |
-| 1. Simulate users | `.venv/bin/python src/ingestion/simulate_users.py --users 400 --days 30` | `data/processed/consumer.duckdb`, `simulated_events.parquet` |
+| 1. Simulate users | `.venv/bin/python src/ingestion/simulate_users.py --users 1000 --days 60 --workers 4` (about 10 minutes) | `data/processed/consumer.duckdb`, `simulated_events.parquet`, `simulation_truth.parquet`, `consumer_profiles.parquet` |
 | 2. Sessionize | `.venv/bin/python src/features/sessionizer.py` | `session_id` on every event, `fact_cross_app_comparisons` |
 | 3. RFM features | `.venv/bin/python src/features/rfm_features.py` | `data/features/rfm_features.parquet` |
 | 4. Behavioral features | `.venv/bin/python src/features/behavioral_features.py` | `data/features/behavioral_features.parquet` |
@@ -909,8 +953,9 @@ whose features do not support any name is labeled `Unclassified` rather than gue
 
 ## Serving Performance
 
-Latency over 100 requests per endpoint, measured against a local Uvicorn server on the full
-400-user warehouse (`make api-benchmark` measures the same in process):
+Latency over 100 requests per endpoint, measured in v1.0 against a local Uvicorn server on the
+400-user warehouse of that version (`make api-benchmark` measures the same in process). It has not been
+re-measured on the v1.4 warehouse or extraction stack; v2.0 re-runs it:
 
 | Endpoint | p50 (ms) | p95 (ms) | p99 (ms) | Target |
 | :--- | :--- | :--- | :--- | :--- |
@@ -937,7 +982,7 @@ To get an honest picture, the same code was run against two public datasets.
 
 | Dataset | What it provides | Used to test |
 | :--- | :--- | :--- |
-| [Amazon Reviews 2023](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023), cell phones and accessories metadata | Real product titles, brands, prices, ratings | Extraction |
+| [Amazon Reviews 2023](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023) product metadata: four shards (cell phones twice, electronics, clothing) | Real product titles, brands, prices, ratings, category paths | Extraction: one shard for tuning, three never-tuned shards held out |
 | [RetailRocket](https://huggingface.co/datasets/DanielKiani/RetailRocket-Recommender-Data) clickstream | 2.76 million real view, cart, and purchase events from 1.4 million visitors | Warehouse, features, and models |
 
 ### Reproduce
@@ -1004,7 +1049,7 @@ stops training before it recovers. The one-tree model (ROC-AUC 0.762) was an ear
 not a property of the data. Without the weight the model is also better ranked (ROC-AUC 0.944 to 0.956
 against 0.880 to 0.889 with it), and every cell beats the single-feature baseline (0.714). The test split
 has only 58 buyers (0.90 percent), so differences between cells carry wide uncertainty. Re-run in v1.3
-on the schema v2 feature SQL; the pattern is unchanged.
+on the schema v2 feature SQL and again in v1.4; the grid is unchanged.
 
 ### Extraction on held-out real listings (v1.2)
 
@@ -1023,7 +1068,7 @@ which the "final category" row counts. Source:
 | :--- | :--- | :--- | :--- |
 | Brand accuracy | 0.629 | 0.597 | +0.032 |
 | Brand confidently wrong | 0.189 | 0.247 | -0.059 |
-| Price accuracy | 0.998 | 0.994 | +0.004 |
+| Price accuracy | 0.999 | 0.998 | +0.001 |
 | Rating accuracy | 1.000 | 1.000 | 0.000 |
 | Category accuracy among non-abstained (rows with a product-type label: tune 4,861, held-out 14,513) | 0.915 | 0.894 | +0.022 |
 | Abstain rate | 0.285 | 0.322 | -0.037 |
@@ -1061,31 +1106,37 @@ higher AUC is better:
 
 | Split | Learned ECE | Hand-weighted ECE | Learned AUC | Hand-weighted AUC |
 | :--- | :--- | :--- | :--- | :--- |
-| Tune | 0.044 | 0.409 | 0.833 | 0.807 |
-| Held-out | 0.037 | 0.408 | 0.821 | 0.809 |
+| Tune | 0.043 | 0.409 | 0.834 | 0.807 |
+| Held-out | 0.036 | 0.408 | 0.822 | 0.808 |
 
-Throughput on 5,000 synthetic events, batch size 256, on this machine (`results.throughput`):
+Throughput on 5,000 synthetic events, batch size 256, on this machine (`results.throughput`, measured
+in the v1.4 re-run; it varies by about 10 percent with machine load, and v1.3 measured 143.9 and 460.0):
 
 | Path | Events per second |
 | :--- | :--- |
-| `process` (one listing at a time) | 143.9 |
-| `process_batch` | 460.0 |
+| `process` (one listing at a time) | 123.7 |
+| `process_batch` | 416.4 |
 
-`process_batch` is 3.2 times faster than `process` and returns the same output.
+`process_batch` is 3.4 times faster than `process` and returns the same output.
 
 ### What held up
 
 - **The infrastructure.** The warehouse, sessionization, feature store, and leakage-safe splits
   ran on 367,624 real events with a single schema change (a wider price column).
-- **Deterministic extraction.** Prices and ratings parse at 99.4% to 100% accuracy on real listings.
+- **Deterministic extraction.** Prices and ratings parse at 99.8% to 100% accuracy on real listings
+  (price accuracy rose from 99.4% after the v1.4 fixes for currency markers and payment offers).
 - **The propensity ranking.** On the disjoint v1.1 split (train 2015-08-24 and 2015-08-31, test
   2015-09-07), the four cells without the class weight reach ROC-AUC 0.944 to 0.956, against 0.762 to 0.889
   with it and a single-feature baseline of 0.714. Precision is much lower: PR-AUC runs from 0.091 to 0.360
   against a 0.90% purchase rate (58 buyers in the test split), which is expected for rare events.
-- **The CLV fallback.** It fires for 78.6% of real customers. Without it, four in five real
-  predictions would have been invalid.
+- **The CLV fallback.** In the v1.0 real-data run it fired for 78.6% of real customers. Without it,
+  four in five real predictions would have been invalid.
 
 ### What failed, and how it was fixed
+
+Found in the v1.0 real-data run, on the shard that later became the tune split. Two of the fixes were
+later replaced: the similarity floor by the supervised taxonomy with abstention (v1.2), and the
+evidence-based confidence by a calibrated learned model (v1.2).
 
 | Problem found on real data | Fix | Result |
 | :--- | :--- | :--- |
@@ -1099,8 +1150,9 @@ Throughput on 5,000 synthetic events, batch size 256, on this machine (`results.
 ### What cannot be tested publicly
 
 App switching is the project's most distinctive idea, and no public dataset has per-user activity
-across several shopping apps. The switching model and four cross-app features remain validated
-only on simulated data.
+across several shopping apps. The switching model and the seven cross-app features remain validated
+only on simulated data. RetailRocket is a single store, so the v1.4 ablation runs it without the
+cross-app block (`reports/v1_4_ablation.json`, `results.retailrocket`).
 
 ---
 
@@ -1195,9 +1247,9 @@ release tripwire G1.3-05 accepts a share from 0.35 to 0.65; the v1.0 value was 0
    from funnel ratios to raw activity volume.
 5. **A confidence score should measure correctness, not completeness.** Counting filled fields
    cannot detect a wrong value.
-6. **Shared feature selection couples models.** Propensity and switching share one feature list,
-   so a fix aimed at one changed the other (switching PR-AUC moved from 0.73 to 0.64 for this
-   reason alone).
+6. **Shared feature selection couples models.** In v1.0, propensity and switching shared one
+   feature list, so a fix aimed at one changed the other (switching PR-AUC moved from 0.73 to 0.64
+   for this reason alone). Since v1.1 each target has its own list.
 7. **Real traffic is mostly cold start.** In the real clickstream, 99.5% of visitors have fewer
    than 20 events, below what the feature store can describe well. A deployed service needs a
    separate answer for them.
@@ -1206,6 +1258,23 @@ release tripwire G1.3-05 accepts a share from 0.35 to 0.65; the v1.0 value was 0
 9. **Serving must reuse training code, not re-describe it.** The API computes features with the
    same SQL functions the feature store uses, restricted to one user. A test asserts that the
    features and the resulting scores are identical to the batch path, so the two cannot drift.
+10. **Measuring honestly can lower the headline, and that is the point.** Separating the train and
+    test target windows (v1.1) moved propensity ROC-AUC from 0.914 to 0.877 on the same data.
+11. **A model can be right and still be fed the wrong input.** On held-out real listings the taxonomy
+    model abstained on 60% of rows because the pipeline gave it a four-token title instead of the
+    listing text it was trained on (v1.2). Fixing the input took accuracy among confident rows from
+    0.721 to 0.894.
+12. **A warehouse built from extraction exposes extraction.** Once every row came from a rendered
+    screen (v1.3), downstream checks caught defects that averages hid: a ₹1 iPhone from lookalike
+    letters in a price, and in v1.4 a ₹5 watch from "stars 5imilar" read as "Rs 5".
+13. **Ground truth turns judgement into measurement.** The 30-minute session threshold chosen in v1.0
+    scored a boundary F1 of 1.0 against the simulator's true sessions; the comparison window was twice
+    as wide as it needed to be (v1.4).
+14. **A planted cause can be recovered end to end.** A price effect planted in the simulator came back
+    from the extracted warehouse with the right sign and growing strength: a price coefficient of
+    +0.40 (interval includes 0) with no effect, -3.16 and -4.86 at two planted strengths (v1.4).
+15. **A feature block's value depends on the target.** Cross-app features add about 0.08 ROC-AUC to
+    switching and nothing to purchase propensity (`reports/v1_4_ablation.json`).
 
 ---
 
@@ -1234,6 +1303,18 @@ release tripwire G1.3-05 accepts a share from 0.35 to 0.65; the v1.0 value was 0
   concurrent writers.
 - **The dashboard talks only to the API.** It needs no models and no database, so it can be
   hosted separately on a small free tier with nothing but the API address.
+- **One write path, with extraction in the loop.** Batch loads and live ingest both go through
+  `src/features/event_loader.py`, which extracts every raw screen before writing it. A second path
+  would let batch and serving disagree; extracting every screen means the models train on the same
+  errors they will see in production.
+- **Ground truth beside the warehouse, never in it.** The simulator writes its causes (true session,
+  product, price, comparison intent) to `simulation_truth.parquet`. Experiments score detectors and
+  recover planted effects against it; a gate fails if any warehouse column is named like a truth
+  column.
+- **Randomness keyed by user and day.** Each simulated day draws from a generator seeded by a stable
+  hash of the seed, the user, and the day, and each price from a hash of the seed, the product, and
+  the app. A shopper's timeline can then be continued exactly from a saved state, and changing one
+  user or one price never shifts another.
 
 ---
 
@@ -1265,15 +1346,20 @@ or could break, without any error:
 
 ## Known Limitations
 
-- **Simulated data.** Absolute metrics reflect the simulator as much as the models. Results use a
-  single random seed (42), and seed variance has not been measured.
-- **Extraction accuracy is optimistic.** The brand heuristics and the taxonomy floor were tuned on
-  the same real sample they were scored on. A held-out evaluation is still needed.
+- **Simulated data.** Absolute metrics reflect the simulator as much as the models. Seed spread is
+  measured (propensity ROC-AUC 0.845 +/- 0.021 over 5 seeds of 500 users and 45 days), but every
+  seed comes from the same generator, and the ablation shows the models recovering mechanisms the
+  generator built in.
+- **Brand extraction on real listings is weak.** On held-out shards brand accuracy is 0.597, and
+  about a quarter of brands are confidently wrong. The brand rules are frozen until a new untouched
+  shard exists, so any tuning can still be measured honestly.
 - **Switching is unproven on real data**, because no public multi-app dataset exists.
-- **One feature list serves two targets.** Switching inherits a list ranked for purchase propensity.
-- **Real-data propensity training stops after one boosting round**, likely an interaction between
-  class weighting and log-loss early stopping. This is a hypothesis that has not been tested.
-- **The extraction benchmark writes to a fixed path** in `data/external/`, unlike the orchestrators.
+- **Product matching is measured on synthetic pairs only.** Real-listing matching has no labelled
+  benchmark. In the default warehouse the four-token title key merges some colour variants, so 221
+  product ids hold more than one SKU.
+- **The simulated population buys far more than real visitors** (93% of users buy, against 25% in
+  RetailRocket), on purpose, so the 7-day targets have both classes; `reports/v1_4_sim_calibration.json`
+  lists every deliberate difference.
 - **Cold-start users are scored, not specially modeled.** Users with fewer than 20 events get a
   prediction flagged `low_history`; there is no separate cold-start model yet.
 - **One writer, one process.** The serving warehouse accepts one writing process, so the API runs
@@ -1287,8 +1373,9 @@ or could break, without any error:
 
 ## Deployment
 
-Version 1.0 is deployed **locally with Docker Compose**. Public hosting is deferred; see
-[Future Work](#future-work).
+The serving stack is deployed **locally with Docker Compose**. The images and the checks below were
+verified at v1.0; v1.1 to v1.4 did not rebuild them, and v2.0 rebuilds and re-verifies them. Public
+hosting is deferred; see [Future Work](#future-work).
 
 ```bash
 docker compose up -d --build        # or: make compose-up
@@ -1339,19 +1426,24 @@ Further work on this project will go into the data and the modeling rather than 
 
 ### Simulation and consumer behavior
 
-- [ ] Richer behavioral simulation: seasonality, promotions and price changes, product launches,
-      and more realistic arrival processes than fixed per-user rates
-- [ ] More archetypes and mixed behavior, so users drift between archetypes over time
-- [ ] Calibrate simulator parameters against the RetailRocket clickstream and real listings
-- [ ] Repeat key results across several random seeds, and report the spread
+- [x] Promotions and per-app price changes (v1.4 price book), and sessions with intent, a purchase
+      funnel, and deliberate cross-app comparisons (v1.4 behaviour engine)
+- [ ] Seasonality, product launches, and arrival processes beyond per-user Poisson sessions
+- [x] Users drift between archetypes over time (v1.4)
+- [ ] More archetypes
+- [x] Compare the simulator with the RetailRocket clickstream and record each deliberate difference
+      (v1.4, `reports/v1_4_sim_calibration.json`)
+- [x] Repeat key results across several random seeds, and report the spread (v1.1, `reports/v1_1_seeds.json`)
 
 ### Data analysis and statistics
 
 - [ ] Exploratory analysis of cross-app journeys: comparison paths, time to purchase, price gaps
-- [ ] Statistical testing: confidence intervals for model metrics, bootstrap comparisons between
-      models, and significance of segment differences
-- [ ] Causal questions on simulated data, where the ground truth is known: the effect of a price
-      gap on switching, uplift modeling for targeting
+- [x] Confidence intervals for model metrics and paired bootstrap comparisons between models and
+      baselines (v1.1)
+- [ ] Significance of segment differences
+- [x] Recover a planted price effect from the extracted warehouse, where the ground truth is known
+      (v1.4, `reports/v1_4_price_effect.json`)
+- [ ] Uplift modeling for targeting
 - [ ] Survival analysis for time to next purchase and time to churn
 
 ### Machine learning
@@ -1359,12 +1451,12 @@ Further work on this project will go into the data and the modeling rather than 
 - [ ] Cold-start scoring for users with little or no history (a base rate by activity level for
       sparse visitors; in-session signals for new ones), replacing the current `low_history` flag
 - [ ] Lighter category assignment for serving, to bring the API's memory below 1 GB
-- [ ] Per-target feature selection, so switching no longer depends on the propensity ranking
+- [x] Per-target feature selection, so switching no longer depends on the propensity ranking (v1.1)
 - [x] Test `scale_pos_weight` against log-loss early stopping on the real data (v1.1; see
       `reports/v1_1_retailrocket.json`)
-- [ ] Held-out evaluation of brand extraction and the taxonomy floor
+- [x] Held-out evaluation of brand extraction and the taxonomy (v1.2, `reports/v1_2_extraction.json`)
 - [x] Reference-date cut for batch CLV transactions (v1.1; CLV now cuts at `TEST_REFERENCE_DATE`)
-- [ ] Output-directory flag for the extraction benchmark
+- [x] Output-directory flag for the extraction benchmark (v1.2, `--output`)
 - [ ] Sequence models over event histories, compared against the aggregate-feature models
 - [ ] Drift monitoring: compare live feature distributions against the training distributions
 
