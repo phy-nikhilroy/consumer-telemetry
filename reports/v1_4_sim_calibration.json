@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "release": "1.4",
+  "generated_at": "2026-11-18T19:55:08+00:00",
+  "git_commit": "3004990",
+  "seed": 42,
+  "results": {
+    "quantities": {
+      "events_per_user_per_active_day": {
+        "simulated": 5.2111,
+        "retailrocket": 12.8296
+      },
+      "median_events_per_session": {
+        "simulated": 3.0,
+        "retailrocket": 1.0
+      },
+      "p90_events_per_session": {
+        "simulated": 6.0,
+        "retailrocket": 11.0
+      },
+      "single_event_session_share": {
+        "simulated": 0.1187,
+        "retailrocket": 0.5046
+      },
+      "cart_to_view_ratio": {
+        "simulated": 0.0946,
+        "retailrocket": 0.0684
+      },
+      "buy_to_cart_ratio": {
+        "simulated": 0.9099,
+        "retailrocket": 0.4494
+      },
+      "share_users_with_purchase": {
+        "simulated": 0.927,
+        "retailrocket": 0.2457
+      }
+    },
+    "simulated": {
+      "events_per_user_per_active_day": 5.2111,
+      "median_events_per_session": 3.0,
+      "p90_events_per_session": 6.0,
+      "single_event_session_share": 0.1187,
+      "cart_to_view_ratio": 0.0946,
+      "buy_to_cart_ratio": 0.9099,
+      "share_users_with_purchase": 0.927
+    },
+    "retailrocket": {
+      "events_per_user_per_active_day": 12.8296,
+      "median_events_per_session": 1.0,
+      "p90_events_per_session": 11.0,
+      "single_event_session_share": 0.5046,
+      "cart_to_view_ratio": 0.0684,
+      "buy_to_cart_ratio": 0.4494,
+      "share_users_with_purchase": 0.2457
+    },
+    "deliberate_differences": [
+      "share_users_with_purchase is far higher than RetailRocket's: the RetailRocket warehouse is a sample of site visitors, most of whom never buy, while every simulated user is a returning customer observed for the whole window. The simulator keeps each binary 7-day target between 5 and 70 percent positive (tests/test_features.py, gate G1.4-06) so the models have both classes to learn.",
+      "buy_to_cart_ratio is higher because a simulated buy may skip the cart (a direct buy from the product page), while RetailRocket logs a transaction only after an add-to-cart event.",
+      "events_per_user_per_active_day is lower: RetailRocket's active days are dominated by a few heavy visitors, while each simulated shopper starts about one session a day of three to six screens. That keeps the default 1,000-user, 60-day run near 175,000 screens, which the extraction loader handles in about ten minutes.",
+      "median_events_per_session is higher and single_event_session_share lower: RetailRocket sessions are mostly one product view from a search result, while each simulated session has an intent family and a funnel, so the sessionizer and the comparison detector have bursts to recover (gate G1.4-05).",
+      "p90_events_per_session is lower: the simulator caps a session at 30 screens and exits the funnel after a buy, while RetailRocket has long browsing sessions by crawlers and heavy visitors."
+    ]
+  },
+  "tripwire_notes": []
+}

@@ -147,8 +147,9 @@ def test_binary_targets_are_binary(split, train, test_matrix):
         # classification metric meaningless.
         assert len(values) == 2, f"{split}.{target} is constant"
 
+        # v1.4 tightened the bounds from 2 to 98 percent to 5 to 70 percent (gate G1.4-06).
         rate = float(df[target].mean())
-        assert 0.02 < rate < 0.98, f"{split}.{target} is degenerate at rate {rate:.3f}"
+        assert 0.05 <= rate <= 0.70, f"{split}.{target} is outside 5 to 70 percent at rate {rate:.3f}"
 
 
 @pytest.mark.parametrize("split", ["train", "test"])
