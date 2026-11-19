@@ -54,6 +54,7 @@ def gate(version: str, gate_id: str, kind: str) -> Callable:
         run.kind = kind  # type: ignore[attr-defined]
         run.__name__ = check.__name__
         run.__doc__ = check.__doc__
+        run.__wrapped__ = check  # type: ignore[attr-defined]
         GATES.setdefault(version, []).append(run)
         return run
 
@@ -561,6 +562,10 @@ def default_load_under_fifteen_minutes() -> Tuple[bool, str]:
     )
 
 
+# Gates that run every other gate; each skips all of them so that none calls another.
+_COMPOSITE_GATES = {"G1.3-12", "G1.4-15"}
+
+
 def _suite_seconds(summary: str) -> float:
     """Wall-clock seconds from a pytest summary line, or infinity when absent."""
     match = re.search(r" in ([0-9.]+)s", summary)
@@ -575,9 +580,210 @@ def suite_fast_and_every_other_gate_passes() -> Tuple[bool, str]:
     count, code, summary = _suite_result()
     seconds = _suite_seconds(summary)
     others = [fn() for version in GATES for fn in GATES[version]
-              if getattr(fn, "gate_id", "") != "G1.3-12"]
+              if getattr(fn, "gate_id", "") not in _COMPOSITE_GATES]
     failed = [r.gate_id for r in others if not r.passed]
     ok = count >= 400 and code == 0 and seconds < 300.0 and not failed
+    return ok, f"{count} tests, {seconds:.0f} s (< 300); {summary}; other gates failing: {failed or 'none'}"
+
+
+# ---------------------------------------------------------------------------------------
+# v1.4: a behaviour engine with ground truth
+# ---------------------------------------------------------------------------------------
+
+BINARY_TARGETS_V14 = ("will_purchase_next_7d", "will_switch_app_next_7d")
+
+
+@gate("1.4", "G1.4-01", "H")
+def catalog_and_products_are_large_enough() -> Tuple[bool, str]:
+    """The catalog has at least 300 SKUs and dim_products at least 250 rows."""
+    from src.ingestion.catalog import build_catalog
+
+    skus = len(build_catalog())
+    products = _scalar("SELECT COUNT(*) FROM dim_products")
+    return skus >= 300 and products >= 250, f"{skus} catalog SKUs (>= 300), {products} dim_products rows (>= 250)"
+
+
+@gate("1.4", "G1.4-02", "H")
+def split_valid_with_v14_constants() -> Tuple[bool, str]:
+    """validate_split passes for the configured dates and the warehouse's last event."""
+    return split_is_valid_against_warehouse.__wrapped__()  # type: ignore[attr-defined]
+
+
+@gate("1.4", "G1.4-03", "H")
+def train_matrix_has_4000_rows() -> Tuple[bool, str]:
+    """The train matrix has at least 4,000 rows."""
+    frame = _train_matrix()
+    per_date = {str(k): v for k, v in frame.group_by("reference_date").len().sort("reference_date").iter_rows()}
+    return frame.height >= 4000, f"{frame.height} rows (>= 4000); per date {per_date}"
+
+
+@gate("1.4", "G1.4-04", "H")
+def truth_matches_raw_events_and_stays_out() -> Tuple[bool, str]:
+    """The truth file and raw_events hold the same event ids, and no truth column is in the warehouse."""
+    import polars as pl
+
+    from src.config import PROCESSED_DATA_DIR
+
+    truth = set(pl.read_parquet(PROCESSED_DATA_DIR / "simulation_truth.parquet", columns=["event_id"])["event_id"])
+    con = _warehouse()
+    try:
+        raw = {r[0] for r in con.execute("SELECT event_id FROM raw_events").fetchall()}
+    finally:
+        con.close()
+    clean, columns = no_ground_truth_columns_in_warehouse.__wrapped__()  # type: ignore[attr-defined]
+    ok = truth == raw and clean
+    return ok, f"{len(truth - raw)} only in truth, {len(raw - truth)} only in raw_events; truth columns: {columns}"
+
+
+@gate("1.4", "G1.4-05", "T")
+def sessions_have_realistic_length() -> Tuple[bool, str]:
+    """Warehouse sessions: median events per session at least 3, single-event share at most 0.30."""
+    con = _warehouse()
+    try:
+        median, single = con.execute(
+            "SELECT median(n), avg(CASE WHEN n = 1 THEN 1.0 ELSE 0.0 END) FROM "
+            "(SELECT session_id, COUNT(*) AS n FROM fact_events WHERE session_id IS NOT NULL GROUP BY session_id)"
+        ).fetchone()
+    finally:
+        con.close()
+    return float(median) >= 3 and float(single) <= 0.30, f"median {median} (>= 3), single-event share {float(single):.3f} (<= 0.30)"
+
+
+@gate("1.4", "G1.4-06", "T")
+def binary_targets_between_5_and_70_percent() -> Tuple[bool, str]:
+    """Each binary target is between 5% and 70% positive in train and test."""
+    import polars as pl
+
+    from src.config import TEST_FEATURES_PATH, TRAIN_FEATURES_PATH
+
+    rates = {}
+    for split, path in (("train", TRAIN_FEATURES_PATH), ("test", TEST_FEATURES_PATH)):
+        frame = pl.read_parquet(path, columns=list(BINARY_TARGETS_V14))
+        for target in BINARY_TARGETS_V14:
+            rates[f"{split}.{target}"] = float(frame[target].cast(pl.Float64).mean())
+    ok = all(0.05 <= r <= 0.70 for r in rates.values())
+    return ok, ", ".join(f"{k} {v:.3f}" for k, v in rates.items()) + " (each in [0.05, 0.70])"
+
+
+@gate("1.4", "G1.4-07", "T")
+def detectors_recover_ground_truth() -> Tuple[bool, str]:
+    """Held-out seeds: sessionizer boundary F1 >= 0.90; comparison recall >= 0.85 and precision >= 0.70."""
+    report = _report("v1_4_detectors")
+    seeds = [str(s) for s in report["report_seeds"]]
+    sess = report["sessionizer"]["report_at_chosen"]
+    comp = report["comparison"]["report_at_chosen"]
+    ok = bool(seeds) and all(sess[s]["f1"] >= 0.90 and comp[s]["recall"] >= 0.85 and comp[s]["precision"] >= 0.70
+                             for s in seeds)
+    detail = "; ".join(f"seed {s}: session F1 {sess[s]['f1']:.3f}, comparison P {comp[s]['precision']:.3f} "
+                       f"R {comp[s]['recall']:.3f}" for s in seeds)
+    return ok, detail
+
+
+def _price_levels() -> Dict[str, Any]:
+    levels = _report("v1_4_price_effect")["levels"]
+    return {str(int(float(k))): v for k, v in levels.items()}
+
+
+@gate("1.4", "G1.4-08", "T")
+def price_dose_response_rises() -> Tuple[bool, str]:
+    """Mean chose_cheaper_app_rate rises by at least 0.05 from price_beta 0 to 4 and again from 4 to 8."""
+    levels = _price_levels()
+    m0, m4, m8 = (float(levels[b]["chose_cheaper_mean"]) for b in ("0", "4", "8"))
+    return m4 - m0 >= 0.05 and m8 - m4 >= 0.05, f"{m0:.3f} -> {m4:.3f} -> {m8:.3f} (steps {m4 - m0:+.3f}, {m8 - m4:+.3f}; >= 0.05)"
+
+
+@gate("1.4", "G1.4-09", "T")
+def price_coefficient_has_expected_sign() -> Tuple[bool, str]:
+    """The price coefficient's 95% CI contains 0 at price_beta 0 and is below 0 at 4 and 8."""
+    levels = _price_levels()
+    ci = {b: (float(levels[b]["regression"]["ci"]["lo"]), float(levels[b]["regression"]["ci"]["hi"])) for b in ("0", "4", "8")}
+    ok = ci["0"][0] <= 0.0 <= ci["0"][1] and ci["4"][1] < 0.0 and ci["8"][1] < 0.0
+    return ok, ", ".join(f"beta {b} [{lo:.3f}, {hi:.3f}]" for b, (lo, hi) in ci.items())
+
+
+@gate("1.4", "G1.4-10", "H")
+def ablation_report_complete() -> Tuple[bool, str]:
+    """The ablation report has models A to D for both targets, five seeds, deltas with CIs, the caveat and RetailRocket."""
+    report = _report("v1_4_ablation")
+    targets = ("will_purchase_next_7d", "switched_given_purchase")
+    problems = []
+    if len(report.get("seeds", [])) < 5:
+        problems.append(f"{len(report.get('seeds', []))} seeds")
+    for seed, block in report["per_seed"].items():
+        for t in targets:
+            models = set(block[t]["models"])
+            if not {"A", "B", "C", "D"} <= models:
+                problems.append(f"seed {seed} {t} models {sorted(models)}")
+            for name in ("B-A", "C-A", "D-A"):
+                d = block[t]["deltas"].get(name, {})
+                if not {"delta", "lo", "hi"} <= set(d):
+                    problems.append(f"seed {seed} {t} {name} without CI")
+    if not str(report.get("caveat") or "").strip():
+        problems.append("no caveat")
+    if not report.get("retailrocket"):
+        problems.append("no retailrocket block")
+    return not problems, "complete" if not problems else "; ".join(problems[:4])
+
+
+@gate("1.4", "G1.4-11", "H")
+def learning_curve_and_calibration_complete() -> Tuple[bool, str]:
+    """The learning curve has four sizes; the calibration report has both columns and deliberate differences."""
+    curve = _report("v1_4_learning_curve")
+    calib = _report("v1_4_sim_calibration")
+    sizes = [p["users"] for p in curve["points"]]
+    columns = all(set(v) == {"simulated", "retailrocket"} for v in calib["quantities"].values())
+    diffs = [d for d in calib.get("deliberate_differences", []) if str(d).strip()]
+    ok = len(sizes) == 4 and columns and bool(diffs)
+    return ok, f"curve sizes {sizes}; calibration columns {'both' if columns else 'missing'}, {len(diffs)} deliberate differences"
+
+
+@gate("1.4", "G1.4-12", "T")
+def propensity_auc_in_v14_range() -> Tuple[bool, str]:
+    """Propensity test ROC-AUC in [0.65, 0.93] and at least the single-feature baseline minus 0.01."""
+    test = _propensity_test()
+    auc = float(test["roc_auc"])
+    base = float(test["baselines"]["single_feature"]["roc_auc"])
+    return 0.65 <= auc <= 0.93 and auc >= base - 0.01, f"model {auc:.4f} in [0.65, 0.93]; single-feature {base:.4f}"
+
+
+@gate("1.4", "G1.4-13", "T")
+def churn_is_identified() -> Tuple[bool, str]:
+    """BG/NBD dropout parameter a above 1e-4; churned share of simulated users between 0.20 and 0.35."""
+    import polars as pl
+
+    from src.config import ARTIFACTS_DIR, DEFAULT_DB_PATH, PROCESSED_DATA_DIR
+    from src.ingestion.simulate_users import default_profiles_path
+
+    a = float(_json(ARTIFACTS_DIR / "clv_summary.json")["bgnbd_params"]["a"])
+    profiles = pl.read_parquet(default_profiles_path(DEFAULT_DB_PATH, PROCESSED_DATA_DIR / "simulation_truth.parquet"),
+                               columns=["churned_day"])
+    share = float(profiles["churned_day"].is_not_null().mean())
+    return a > 1e-4 and 0.20 <= share <= 0.35, f"dropout a {a:.4f} (> 1e-4); churned share {share:.3f} of {profiles.height} users"
+
+
+@gate("1.4", "G1.4-14", "H")
+def simulation_has_no_module_random_or_archetype_loop() -> Tuple[bool, str]:
+    """ARCHETYPE_PARAMS is not read in src/simulation/ and no module-level random call appears there."""
+    pattern = re.compile(r"random\.(random|choice|choices|randint|uniform|seed)\b")
+    hits = []
+    for path in sorted((_ROOT / "src" / "simulation").glob("*.py")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if pattern.search(line) or "ARCHETYPE_PARAMS" in line:
+                hits.append(f"{path.name}:{n}")
+    return not hits, "none" if not hits else ", ".join(hits[:6])
+
+
+@gate("1.4", "G1.4-15", "H")
+def suite_fast_with_450_tests_and_all_gates_pass() -> Tuple[bool, str]:
+    """At least 450 tests, the suite passes in under 5 minutes, and every other gate of every version passes."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False, "not run inside pytest (it would run the suite recursively)"
+    count, code, summary = _suite_result()
+    seconds = _suite_seconds(summary)
+    others = [fn() for version in GATES for fn in GATES[version]
+              if getattr(fn, "gate_id", "") not in _COMPOSITE_GATES]
+    failed = [r.gate_id for r in others if not r.passed]
+    ok = count >= 450 and code == 0 and seconds < 300.0 and not failed
     return ok, f"{count} tests, {seconds:.0f} s (< 300); {summary}; other gates failing: {failed or 'none'}"
 
 

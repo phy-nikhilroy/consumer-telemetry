@@ -78,3 +78,39 @@ def test_suite_seconds_reads_the_pytest_summary():
 
 def test_feature_sql_gate_passes_on_this_checkout():
     assert gates.feature_sql_has_no_avg_price().passed
+
+
+def test_v1_4_gates_are_registered_with_their_types():
+    """G1.4-01 to G1.4-15 are registered once each; 05 to 09, 12 and 13 are tripwires."""
+    ids = [fn.gate_id for fn in GATES["1.4"]]
+    assert ids == [f"G1.4-{i:02d}" for i in range(1, 16)]
+    kinds = {fn.gate_id: fn.kind for fn in GATES["1.4"]}
+    tripwires = {f"G1.4-{i:02d}" for i in (5, 6, 7, 8, 9, 12, 13)}
+    assert {g for g, k in kinds.items() if k == "T"} == tripwires
+
+
+def test_composite_gates_skip_each_other(monkeypatch):
+    """G1.3-12 and G1.4-15 both run every other gate, so each must skip both or they recurse."""
+    assert gates._COMPOSITE_GATES == {"G1.3-12", "G1.4-15"}
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr(gates, "_suite_result", lambda: (900, 0, "900 passed in 200.00s"))
+    calls = []
+
+    def stub(gid):
+        def fake():
+            calls.append(gid)
+            return GateResult(gid, "H", True, "ok")
+        fake.gate_id = gid
+        return fake
+
+    for version in list(GATES):
+        replaced = [fn if fn.gate_id in gates._COMPOSITE_GATES else stub(fn.gate_id) for fn in GATES[version]]
+        monkeypatch.setitem(GATES, version, replaced)
+    for gid in ("G1.3-12", "G1.4-15"):
+        composite = next(fn for v in GATES for fn in GATES[v] if fn.gate_id == gid)
+        assert composite().passed, gid
+    assert not set(calls) & gates._COMPOSITE_GATES
+
+
+def test_simulation_grep_gate_passes_on_this_checkout():
+    assert gates.simulation_has_no_module_random_or_archetype_loop().passed
