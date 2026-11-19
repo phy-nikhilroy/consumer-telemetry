@@ -67,7 +67,7 @@ run-pipeline:
 	$(PYTHON) -c "from src.ingestion.pipeline import process; print(process('Samsung Galaxy S24 Ultra 256GB Titanium \$$1,299.99 4.7★ Add to Cart').model_dump_json(indent=2))"
 
 simulate:
-	$(PYTHON) src/ingestion/simulate_users.py --users 400 --days 30
+	$(PYTHON) src/ingestion/simulate_users.py --users 1000 --days 60 --workers 4
 
 sessionize:
 	$(PYTHON) src/features/sessionizer.py

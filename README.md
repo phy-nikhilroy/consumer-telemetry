@@ -7,7 +7,7 @@ those predictions live through an API and a dashboard.
 
 **Status:** version 1.0 is complete. Extraction, feature engineering, modeling, and the serving
 layer (API, live event stream, dashboard, Docker images and Compose stack) are built, tested with
-892 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
+895 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
 See [Project Status](#project-status), [Deployment](#deployment), and [Future Work](#future-work).
 
 ---
@@ -157,22 +157,23 @@ feeds the API realistic traffic, and a Streamlit dashboard and a terminal monito
 ### The data
 
 No public dataset contains per-user shopping activity across several apps, so the main dataset
-is **simulated**. The simulator creates 400 users over 30 days on four apps (`amazon_in`,
+is **simulated**. The behaviour engine creates 1,000 users over 60 days on four apps (`amazon_in`,
 `flipkart`, `walmart`, `amazon_us`). Each user belongs to one of five behavioral types (loyalist,
-impulse buyer, bargain hunter, comparison shopper, window shopper) and also carries personal traits
-such as a spending tier and an activity level, so two users of the same type still behave
-differently. A share of users go dormant, which gives the lifetime value models a real churn
-signal.
+impulse buyer, bargain hunter, comparison shopper, window shopper), may drift to another type over
+time, and carries personal traits such as a spending tier, an activity level, and a price
+sensitivity, so two users of the same type still behave differently. Prices come from a seeded price
+book with per-app price factors and promotion episodes. About a quarter of users (25.7%) churn,
+which gives the lifetime value models a real churn signal.
 
 Current simulated warehouse:
 
 | Quantity | Value |
 | :--- | :--- |
-| Events | 138,242 |
-| Users | 400 |
-| Products | 162 |
-| Sessions | 79,105 |
-| Cross-app comparison sessions | 16,094 |
+| Events | 173,277 |
+| Users | 1,000 |
+| Products | 1,049 |
+| Sessions | 53,273 |
+| Cross-app comparison sessions | 13,474 |
 
 To check that the code is not only learning its own simulator, the pipeline was also run on two
 real datasets. See [Real-World Validation](#real-world-validation).
@@ -188,6 +189,7 @@ real datasets. See [Real-World Validation](#real-world-validation).
 | 3. Models | Propensity, calibration and lift, app switching with SHAP, CLV, segmentation, executive evaluation report, expanded test suite | Complete | `v0.3-models-complete` |
 | Validation | Full pipeline run against real Amazon listings and the RetailRocket clickstream; defects found and fixed | Complete | included in `main` |
 | 4. Serving | FastAPI ingestion and prediction endpoints, live event stream and monitor, Streamlit dashboard, Docker images and Compose stack, local deployment, end-to-end tests, latency benchmarks | Complete | `v1.0-complete` |
+| 5. Simulation realism (v1.4) | Seeded price book per SKU and app, per-user behaviour profiles, sessionizer and comparison detectors validated on held-out seeds, planted price-effect experiment, feature-block ablation, learning curve, simulator calibration against RetailRocket | Complete | `v1.4-simulation` |
 | Future | Deeper simulation, consumer behavior analysis, statistics, and modeling; public hosting | Planned | see [Future Work](#future-work) |
 
 ---
@@ -238,7 +240,7 @@ consumer-telemetry/
 │   ├── simulation/            # Phase 4: live event stream and terminal monitor
 │   └── dashboard/             # Phase 4: Streamlit dashboard
 ├── notebooks/                 # Executed analysis notebooks and the HTML evaluation report
-└── tests/                     # 56 test modules, 892 tests
+└── tests/                     # 65 test modules, 895 tests
 ```
 
 ### Module guide
@@ -374,7 +376,7 @@ make run-pipeline   # extracts one sample product and prints the JSON record
 | `make test` | Runs the full pytest suite |
 | `make check` | Shows `git status` |
 | `make run-pipeline` | Pushes one sample screen string through the extraction pipeline |
-| `make simulate` | Regenerates 400 simulated users over 30 days and reloads the warehouse |
+| `make simulate` | Regenerates 1,000 simulated users over 60 days and reloads the warehouse (about 10 minutes) |
 | `make sessionize` | Builds sessions and detects cross-app comparisons |
 | `make features` | Builds both feature blocks, the feature store, and the selected feature list |
 | `make models` | Trains and evaluates propensity, switching, CLV, and segmentation |
@@ -694,14 +696,14 @@ in `src/config.py`).
 | File | Contents |
 | :--- | :--- |
 | `rfm_features.parquet`, `behavioral_features.parquet` | Per-user feature blocks |
-| `train_features.parquet`, `test_features.parquet` | Modeling matrices: train has 800 rows and test has 400 rows, 39 columns each |
+| `train_features.parquet`, `test_features.parquet` | Modeling matrices: train has 5,000 rows and test has 1,000 rows, 39 columns each |
 | `selected_features.json` | 33 candidate features; each per-target list (`will_purchase_next_7d`, `will_switch_app_next_7d`, `switched_given_purchase`) holds all 33. No feature was dropped as zero-variance or collinear, and there is no top-k cut |
 | `user_clv.parquet` | Per-user lifetime value predictions |
 | `user_segments.parquet` | Per-user cluster and segment name |
 
-The train matrix stacks two reference dates, 2026-10-06 and 2026-10-13, so it has one row per
-(`user_id`, `reference_date`) pair (800 rows for the 400 users). The test matrix uses the single
-reference date 2026-10-20. `validate_split` checks that every train target window ends before the test
+The train matrix stacks five weekly reference dates, 2026-10-12 to 2026-11-09, so it has one row per
+(`user_id`, `reference_date`) pair (5,000 rows for the 1,000 users). The test matrix uses the single
+reference date 2026-11-16. `validate_split` checks that every train target window ends before the test
 reference date.
 
 ### Prediction targets
@@ -1121,22 +1123,23 @@ Schema version 2 adds the tables and columns that make this possible:
 | :--- | :--- |
 | `schema_info` | Records `schema_version` (2). `migrate` upgrades a version 1 warehouse in place |
 | `raw_events` | One row per captured screen: the raw text and the `extractor_version` that read it |
-| `fact_price_observations` | One row per priced listing on a screen, focal and context: 308,139 rows |
+| `fact_price_observations` | One row per priced listing on a screen, focal and context: 424,479 rows |
 | `product_aliases` | Every product-matching decision, so a rebuilt registry resolves screens exactly as the original did |
 
-`fact_events` holds 138,242 rows, one per `raw_events` row. `dim_products` holds 162 products. Before
-the v1.3 matcher fixes the same events resolved to 1,026 products for 17 true products.
+`fact_events` holds 173,277 rows, one per `raw_events` row. `dim_products` holds 1,049 products for the
+303-SKU catalog (the four-token title key merges some colour variants of a family). Before the v1.3
+matcher fixes, the v1.3 default events resolved to 1,026 products for 17 true products.
 
-Extraction accuracy at the default noise of 0.01, over all 138,242 events (measured on the rebuilt
+Extraction accuracy at the default noise of 0.01, over all 173,277 events (gate G1.3-06, measured on the rebuilt
 default warehouse; the noise propagation report does not include this level). An event is correct for
 product identity when its `canonical_product_id` equals the one most events of the same true product
 received:
 
 | Field | Accuracy | Required |
 | :--- | :--- | :--- |
-| Action | 0.9986 | at least 0.97 |
+| Action | 0.9977 | at least 0.97 |
 | Price (within 1%) | 1.0000 | at least 0.95 |
-| Product identity | 0.9536 | at least 0.95 |
+| Product identity | 0.9738 | at least 0.95 |
 
 Before the OCR-tolerant price parsing and product matching work, identity was 0.9027 and price was
 0.9877.
@@ -1148,14 +1151,15 @@ delta is the paired difference against the baseline on shared users:
 
 | OCR noise | Action | Price | Product identity | Product id collisions | Propensity ROC-AUC (95% CI) | Delta vs baseline (95% CI) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 0.00 | 1.0000 | 1.0000 | 1.0000 | 0 | 0.882 (0.846 to 0.914) | baseline |
-| 0.02 | 0.9973 | 1.0000 | 0.9035 | 17 | 0.873 (0.836 to 0.906) | -0.006 (-0.018 to 0.006) |
-| 0.05 | 0.9937 | 0.9999 | 0.7359 | 17 | 0.874 (0.835 to 0.909) | -0.007 (-0.021 to 0.007) |
+| 0.00 | 1.0000 | 1.0000 | 1.0000 | 0 | 0.784 (0.740 to 0.825) | baseline |
+| 0.02 | 0.9956 | 1.0000 | 0.9445 | 266 | 0.776 (0.730 to 0.819) | -0.007 (-0.025 to 0.010) |
+| 0.05 | 0.9885 | 1.0000 | 0.8342 | 298 | 0.754 (0.707 to 0.799) | -0.015 (-0.035 to 0.006) |
 
-The noise-free row (0.882) differs from the 0.872 in `src/models/artifacts/propensity_metrics.json` as
-expected: the experiment's noise-free level uses OCR noise 0.0, while the default warehouse uses
-`SIMULATION_OCR_NOISE` = 0.01. In
-this run, the drop in product identity accuracy cost little ROC-AUC at these noise levels.
+The noise-free row (0.784) is lower than the 0.886 in `src/models/artifacts/propensity_metrics.json`
+because the experiment runs a smaller population over a shorter window (400 users, 30 days) than the
+default warehouse (1,000 users, 60 days); compare rows within the table, not across. In this run the
+drop in product identity accuracy cost little ROC-AUC: both deltas are small and their intervals
+include zero.
 
 New price features (`src/features/behavioral_features.py`):
 
@@ -1239,7 +1243,7 @@ release tripwire G1.3-05 accepts a share from 0.35 to 0.65; the v1.0 value was 0
 make test             # or: .venv/bin/pytest -v
 ```
 
-The suite has **892 tests** and runs in under five minutes (241 seconds in the S9 gate run). Serving tests run
+The suite has **895 tests** and runs in under five minutes (223 seconds in the v1.4 release run). Serving tests run
 against a small simulated warehouse built in a temporary directory, never against the real
 warehouses. Beyond unit tests for each module, several tests guard properties that once broke,
 or could break, without any error:
@@ -1247,7 +1251,7 @@ or could break, without any error:
 | Test file | Guards |
 | :--- | :--- |
 | `test_leakage.py` | Features never use events after the reference date |
-| `test_features.py` | Each binary target stays between 2% and 98% positive, so it is learnable |
+| `test_features.py` | Each binary target stays between 5% and 70% positive, so it is learnable |
 | `test_clv.py` | The BG/NBD dropout parameter stays above `1e-4`, so churn is modeled |
 | `test_output_isolation.py` | A second dataset never writes into the default directories |
 | `test_pipeline.py` | Every catalog product keeps its brand and a real category after extraction changes |
