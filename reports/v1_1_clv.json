@@ -1,86 +1,86 @@
 {
   "schema_version": 1,
   "release": "1.1",
-  "generated_at": "2026-11-18T14:16:54+00:00",
-  "git_commit": "76fcda3",
+  "generated_at": "2026-11-19T02:56:54+00:00",
+  "git_commit": "1a90455",
   "seed": 42,
   "results": {
-    "calibration_end": "2026-10-18 00:00:00",
-    "holdout_days": 9,
-    "n_customers": 288,
-    "n_customers_with_holdout_purchase": 167,
-    "actual_total_purchases": 534,
-    "predicted_total_purchases": 550.8051827006541,
-    "naive_total_purchases": 868.32662287403,
-    "mae_purchases_bgnbd": 1.6046010767524623,
-    "mae_purchases_naive": 1.8704626362146195,
-    "spearman_spend_bgnbd_gg": 0.49601986824479355,
-    "spearman_spend_naive": 0.5056356239750831,
+    "calibration_end": "2026-11-02 00:00:00",
+    "holdout_days": 21,
+    "n_customers": 908,
+    "n_customers_with_holdout_purchase": 692,
+    "actual_total_purchases": 4040,
+    "predicted_total_purchases": 3747.8975770883135,
+    "naive_total_purchases": 5389.828333319156,
+    "mae_purchases_bgnbd": 2.628740466476761,
+    "mae_purchases_naive": 2.8634151297375494,
+    "spearman_spend_bgnbd_gg": 0.5459336055107832,
+    "spearman_spend_naive": 0.5431804243163623,
     "by_frequency_bucket": {
       "0": {
-        "n": 57,
-        "mean_predicted_purchases": 1.5090606312556953,
-        "mean_actual_purchases": 0.543859649122807
+        "n": 98,
+        "mean_predicted_purchases": 1.7204081942992058,
+        "mean_actual_purchases": 0.7040816326530612
       },
       "1": {
-        "n": 46,
-        "mean_predicted_purchases": 1.091593874909855,
-        "mean_actual_purchases": 0.45652173913043476
+        "n": 98,
+        "mean_predicted_purchases": 1.682067074689006,
+        "mean_actual_purchases": 1.5612244897959184
       },
       "2": {
-        "n": 42,
-        "mean_predicted_purchases": 1.4234298547300588,
-        "mean_actual_purchases": 1.3095238095238095
+        "n": 73,
+        "mean_predicted_purchases": 2.2046982834258086,
+        "mean_actual_purchases": 2.0684931506849313
       },
       "3-5": {
-        "n": 83,
-        "mean_predicted_purchases": 1.9364729019655431,
-        "mean_actual_purchases": 1.855421686746988
+        "n": 212,
+        "mean_predicted_purchases": 3.090496774986433,
+        "mean_actual_purchases": 2.919811320754717
       },
       "6+": {
-        "n": 60,
-        "mean_predicted_purchases": 3.2344017285237245,
-        "mean_actual_purchases": 4.55
+        "n": 427,
+        "mean_predicted_purchases": 6.085074261686794,
+        "mean_actual_purchases": 7.138173302107728
       }
     },
     "order_value_mae": {
-      "gamma_gamma": 16748.481212710525,
-      "observed_mean": 12416.060706719145,
-      "shrunk": 12454.842721965422
+      "gamma_gamma": 16258.709025178774,
+      "observed_mean": 12754.839111630643,
+      "shrunk": 12115.908258357236
     },
     "shrinkage_k": 3.0,
-    "global_mean_order_value": 21729.902547108508,
+    "global_mean_order_value": 22760.119004444445,
     "bgnbd_params": {
-      "r": 2.169645274826711,
-      "alpha": 10.629050260092434,
-      "a": 0.001120813284112316,
-      "b": 0.05940492671460044
+      "r": 2.2250952171607428,
+      "alpha": 10.47704791921219,
+      "a": 0.025619596977992667,
+      "b": 0.9155150840316308
     },
     "gamma_gamma_params": {
-      "p": 9.88667820124709,
-      "q": 0.20571097186088824,
-      "v": 9.793506074639302
+      "p": 9.854134083863949,
+      "q": 0.1993382035651911,
+      "v": 9.792147401023563
     },
     "gamma_gamma_mean_undefined": true,
     "regressor_comparison": {
-      "train_ref": "2026-10-09 00:00:00",
-      "test_ref": "2026-10-18 00:00:00",
-      "horizon_days": 9,
-      "n_train_users": 400,
-      "n_test_users": 400,
+      "train_ref": "2026-10-12 00:00:00",
+      "test_ref": "2026-11-02 00:00:00",
+      "horizon_days": 21,
+      "n_train_users": 1000,
+      "n_test_users": 1000,
       "n_features": 33,
       "regressor_all_test_users": {
-        "spearman": 0.6480447405911929,
-        "mae": 27141.055416234558
+        "spearman": 0.6836708363476437,
+        "mae": 77908.60116209746
       },
-      "n_bgnbd_scorable_users": 288,
+      "n_bgnbd_scorable_users": 908,
       "regressor_on_bgnbd_subset": {
-        "spearman": 0.6205957222301927,
-        "mae": 35927.80475401404
+        "spearman": 0.6369412969094174,
+        "mae": 84648.62215869447
       },
       "bgnbd_gg_on_bgnbd_subset": {
-        "spearman": 0.49601986824479355,
-        "mae": 42953.688912294776
+        "spearman": 0.5459336055107832,
+        "mae": 78275.38243425138
       }
     }
   },

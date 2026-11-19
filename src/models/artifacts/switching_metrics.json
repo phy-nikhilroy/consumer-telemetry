@@ -36,110 +36,110 @@
     "evening_event_share"
   ],
   "binary_train": {
-    "n_samples": 800,
-    "positive_rate": 0.3275,
-    "roc_auc": 0.9100925111382276,
-    "pr_auc": 0.8397602419167469,
-    "f1": 0.7323340471092077,
-    "accuracy": 0.84375,
-    "log_loss": 0.3991477377005863,
+    "n_samples": 5000,
+    "positive_rate": 0.3826,
+    "roc_auc": 0.8448643291234796,
+    "pr_auc": 0.7632137557463687,
+    "f1": 0.6785119378123264,
+    "accuracy": 0.7684,
+    "log_loss": 0.47710951831714066,
     "confusion_matrix": {
-      "true_negative": 504,
-      "false_positive": 34,
-      "false_negative": 91,
-      "true_positive": 171
+      "true_negative": 2620,
+      "false_positive": 467,
+      "false_negative": 691,
+      "true_positive": 1222
     }
   },
   "binary_test": {
-    "n_samples": 400,
-    "positive_rate": 0.26,
-    "roc_auc": 0.7981094074844075,
-    "pr_auc": 0.5476599601367012,
-    "f1": 0.52,
-    "accuracy": 0.76,
-    "log_loss": 0.466693823087335,
+    "n_samples": 1000,
+    "positive_rate": 0.329,
+    "roc_auc": 0.8464116978243243,
+    "pr_auc": 0.7117883435756918,
+    "f1": 0.6500777604976672,
+    "accuracy": 0.775,
+    "log_loss": 0.4486072866310527,
     "confusion_matrix": {
-      "true_negative": 252,
-      "false_positive": 44,
-      "false_negative": 52,
-      "true_positive": 52
+      "true_negative": 566,
+      "false_positive": 105,
+      "false_negative": 120,
+      "true_positive": 209
     },
     "ci": {
       "roc_auc": {
-        "point": 0.7981094074844075,
-        "lo": 0.7459700928999174,
-        "hi": 0.8457132528453142
+        "point": 0.8464116978243243,
+        "lo": 0.8211649097669005,
+        "hi": 0.8701780909424283
       },
       "pr_auc": {
-        "point": 0.5476599601367012,
-        "lo": 0.4527793882071688,
-        "hi": 0.6611286270749898
+        "point": 0.7117883435756918,
+        "lo": 0.6626422172056132,
+        "hi": 0.7600267167806196
       }
     },
     "baselines": {
       "logistic": {
-        "roc_auc": 0.822862525987526,
-        "pr_auc": 0.5783519315266145
+        "roc_auc": 0.8380813466268646,
+        "pr_auc": 0.6905807008176102
       },
       "single_feature": {
         "feature": "total_purchases_30d",
-        "roc_auc": 0.7419925935550935,
-        "pr_auc": 0.45506962169399734
+        "roc_auc": 0.7879520200761916,
+        "pr_auc": 0.6137011501843982
       }
     },
     "delta_vs_logistic": {
-      "delta": -0.024753118503118454,
-      "lo": -0.052113511647443614,
-      "hi": 0.0016307476552485536
+      "delta": 0.008330351197459729,
+      "lo": -0.00033165364047713623,
+      "hi": 0.01722601290771062
     },
     "delta_vs_single_feature": {
-      "delta": 0.056116813929314,
-      "lo": 0.01766844320482019,
-      "hi": 0.09431403942994139
+      "delta": 0.058459677748132766,
+      "lo": 0.03882949542640876,
+      "hi": 0.0764685018102629
     }
   },
   "binary_test_tuned_threshold": {
-    "n_samples": 400,
-    "positive_rate": 0.26,
-    "roc_auc": 0.7981094074844075,
-    "pr_auc": 0.5476599601367012,
-    "f1": 0.6190476190476191,
-    "accuracy": 0.76,
-    "log_loss": 0.466693823087335,
+    "n_samples": 1000,
+    "positive_rate": 0.329,
+    "roc_auc": 0.8464116978243243,
+    "pr_auc": 0.7117883435756918,
+    "f1": 0.6795366795366795,
+    "accuracy": 0.751,
+    "log_loss": 0.4486072866310527,
     "confusion_matrix": {
-      "true_negative": 226,
-      "false_positive": 70,
-      "false_negative": 26,
-      "true_positive": 78
+      "true_negative": 487,
+      "false_positive": 184,
+      "false_negative": 65,
+      "true_positive": 264
     }
   },
   "tuned_threshold": 0.37999999999999995,
   "multiclass_test": {
-    "n_samples": 400,
-    "accuracy": 0.6975,
-    "macro_f1": 0.5684877489529847,
-    "weighted_f1": 0.6900103059344801,
-    "multi_log_loss": 0.6699074550750223,
+    "n_samples": 1000,
+    "accuracy": 0.696,
+    "macro_f1": 0.6289378968144849,
+    "weighted_f1": 0.6863573447725897,
+    "multi_log_loss": 0.692743369587899,
     "class_distribution": {
-      "no_purchase": 239,
-      "bought_on_dominant_app": 57,
-      "switched_app": 104
+      "no_purchase": 492,
+      "bought_on_dominant_app": 179,
+      "switched_app": 329
     },
     "confusion_matrix": [
       [
-        193,
-        6,
-        40
+        391,
+        22,
+        79
       ],
       [
-        12,
-        12,
-        33
+        47,
+        60,
+        72
       ],
       [
-        21,
-        9,
-        74
+        60,
+        24,
+        245
       ]
     ],
     "labels": [
@@ -149,51 +149,51 @@
     ]
   },
   "conditional_test": {
-    "n_samples": 161,
-    "positive_rate": 0.6459627329192547,
-    "roc_auc": 0.7155026990553307,
-    "pr_auc": 0.7899452248287102,
+    "n_samples": 508,
+    "positive_rate": 0.6476377952755905,
+    "roc_auc": 0.7611179976566879,
+    "pr_auc": 0.8334396349235572,
     "ci": [
-      0.6270727924036748,
-      0.7946501782531195
+      0.7147411224225357,
+      0.8059246154818815
     ],
-    "baseline_dominant_share_auc": 0.7311909581646424,
-    "delta_vs_baseline": -0.01568825910931171
+    "baseline_dominant_share_auc": 0.7417177497410471,
+    "delta_vs_baseline": 0.019400247915640767
   },
   "top_shap_drivers": [
     {
       "rank": 1,
-      "feature": "view_to_cart_ratio",
-      "mean_abs_shap": 0.5703876081975232,
-      "direction": 0.7845837952512531,
-      "effect": "increases switching"
+      "feature": "days_since_last_event",
+      "mean_abs_shap": 0.40525874199527784,
+      "direction": -0.8916742563773267,
+      "effect": "reduces switching"
     },
     {
       "rank": 2,
-      "feature": "days_since_last_cart_add",
-      "mean_abs_shap": 0.151227409133201,
-      "direction": -0.02920748768784701,
+      "feature": "days_since_last_purchase",
+      "mean_abs_shap": 0.40074444751701266,
+      "direction": -0.37390310826626827,
       "effect": "reduces switching"
     },
     {
       "rank": 3,
-      "feature": "app_entropy",
-      "mean_abs_shap": 0.1383064417432197,
-      "direction": 0.8075673808606235,
+      "feature": "view_to_cart_ratio",
+      "mean_abs_shap": 0.2407716267316083,
+      "direction": 0.8887615068769379,
       "effect": "increases switching"
     },
     {
       "rank": 4,
-      "feature": "days_since_last_event",
-      "mean_abs_shap": 0.1364474805552143,
-      "direction": -0.833064855092452,
+      "feature": "dominant_app_share",
+      "mean_abs_shap": 0.17661203038199969,
+      "direction": -0.9505455490259125,
       "effect": "reduces switching"
     },
     {
       "rank": 5,
-      "feature": "total_sessions_7d",
-      "mean_abs_shap": 0.1278620622700693,
-      "direction": 0.6111619021355486,
+      "feature": "total_purchases_30d",
+      "mean_abs_shap": 0.13807665152982052,
+      "direction": 0.873108407599056,
       "effect": "increases switching"
     }
   ]

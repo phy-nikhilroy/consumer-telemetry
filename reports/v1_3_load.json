@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "release": "1.3",
-  "generated_at": "2026-11-18T15:50:14+00:00",
-  "git_commit": "d38917c",
+  "generated_at": "2026-11-19T03:30:35+00:00",
+  "git_commit": "1a90455",
   "seed": 42,
   "results": {
     "users": 400,
@@ -10,20 +10,20 @@
     "seed": 42,
     "ocr_noise": 0.01,
     "workers": 4,
-    "events": 138242,
+    "events": 37079,
     "counts": {
-      "raw_events": 138242,
-      "fact_events": 138242,
-      "fact_price_observations": 308139,
+      "raw_events": 37079,
+      "fact_events": 37079,
+      "fact_price_observations": 90916,
       "skipped": 0,
-      "dim_products": 162,
+      "dim_products": 693,
       "dim_users": 400
     },
-    "simulate_seconds": 8.9,
-    "extract_wait_seconds": 272.42,
-    "resolve_seconds": 58.67,
-    "write_seconds": 18.66,
-    "total_seconds": 351.38
+    "simulate_seconds": 2.72,
+    "extract_wait_seconds": 16.25,
+    "resolve_seconds": 125.22,
+    "write_seconds": 3.22,
+    "total_seconds": 145.11
   },
   "tripwire_notes": []
 }

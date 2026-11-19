@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
   "release": "1.2",
-  "generated_at": "2026-11-18T15:05:13+00:00",
-  "git_commit": "b057c78",
+  "generated_at": "2026-11-19T03:28:05+00:00",
+  "git_commit": "1a90455",
   "seed": 42,
   "results": {
     "throughput": {
       "n_events": 5000,
       "batch_size": 256,
-      "process_events_per_s": 143.9,
-      "process_batch_events_per_s": 460.0,
-      "speedup": 3.2
+      "process_events_per_s": 123.7,
+      "process_batch_events_per_s": 416.4,
+      "speedup": 3.37
     },
     "real": {
       "tune": {
@@ -18,7 +18,7 @@
         "category_n": 4861,
         "brand_accuracy": 0.629,
         "brand_confidently_wrong_rate": 0.1886,
-        "price_accuracy": 0.998,
+        "price_accuracy": 0.999,
         "rating_accuracy": 1.0,
         "category_accuracy_non_abstained": 0.9154200230149597,
         "abstain_rate": 0.2849207981896729,
@@ -32,7 +32,7 @@
         "category_n": 14513,
         "brand_accuracy": 0.5966,
         "brand_confidently_wrong_rate": 0.24746666666666667,
-        "price_accuracy": 0.9944666666666667,
+        "price_accuracy": 0.9976666666666667,
         "rating_accuracy": 1.0,
         "category_accuracy_non_abstained": 0.8935759300670868,
         "abstain_rate": 0.3221249913870323,
@@ -46,7 +46,7 @@
       "gap": {
         "brand_accuracy": 0.032399999999999984,
         "brand_confidently_wrong_rate": -0.05886666666666668,
-        "price_accuracy": 0.0035333333333332773,
+        "price_accuracy": 0.0013333333333332975,
         "rating_accuracy": 0.0,
         "category_accuracy_non_abstained": 0.02184409294787293,
         "abstain_rate": -0.0372041931973594,
@@ -94,27 +94,27 @@
       "tune": {
         "split": "tune",
         "n": 3000,
-        "positive_rate": 0.3933333333333333,
+        "positive_rate": 0.39366666666666666,
         "learned": {
-          "ece": 0.043697609582205976,
-          "auc": 0.8332275563419633
+          "ece": 0.04339239933260755,
+          "auc": 0.8335559963300174
         },
         "hand_weighted": {
-          "ece": 0.4091172,
-          "auc": 0.8068939746693984
+          "ece": 0.40900889999999995,
+          "auc": 0.8065552762053012
         }
       },
       "heldout": {
         "split": "heldout",
         "n": 3000,
-        "positive_rate": 0.3953333333333333,
+        "positive_rate": 0.39566666666666667,
         "learned": {
-          "ece": 0.03676680497647394,
-          "auc": 0.8214366060488871
+          "ece": 0.03643787360965496,
+          "auc": 0.8216703198048727
         },
         "hand_weighted": {
-          "ece": 0.4078730666666667,
-          "auc": 0.8088850350747698
+          "ece": 0.4077897333333333,
+          "auc": 0.8079862697145161
         }
       }
     }

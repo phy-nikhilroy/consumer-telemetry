@@ -7,7 +7,7 @@ those predictions live through an API and a dashboard.
 
 **Status:** version 1.0 is complete. Extraction, feature engineering, modeling, and the serving
 layer (API, live event stream, dashboard, Docker images and Compose stack) are built, tested with
-786 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
+892 passing tests, and deployed locally with Docker. Public hosting is deferred to future work.
 See [Project Status](#project-status), [Deployment](#deployment), and [Future Work](#future-work).
 
 ---
@@ -238,7 +238,7 @@ consumer-telemetry/
 │   ├── simulation/            # Phase 4: live event stream and terminal monitor
 │   └── dashboard/             # Phase 4: Streamlit dashboard
 ├── notebooks/                 # Executed analysis notebooks and the HTML evaluation report
-└── tests/                     # 56 test modules, 786 tests
+└── tests/                     # 56 test modules, 892 tests
 ```
 
 ### Module guide
@@ -729,95 +729,96 @@ has not seen, exactly as it would be in production.
 
 ## Models and Results
 
-All figures below are from the simulated dataset (400 users), measured on the held-out test
-period. They show that each model works as designed. They are **not** a forecast of real-world
-accuracy, because the simulator itself decides how predictable users are. Real-data results are in
-the next section.
+All figures below are from the simulated dataset (the default warehouse: 1,000 users, 60 days, seed
+42), measured on the held-out test period. They show that each model works as designed. They are
+**not** a forecast of real-world accuracy, because the simulator itself decides how predictable users
+are. Real-data results are in the next section.
 
 ### Purchase propensity
 
-A LightGBM classifier predicting `will_purchase_next_7d`. 40.25% of the 400 test users made a
-purchase. The model is trained on two stacked reference dates (2026-10-06 and 2026-10-13, 800 train
-rows) and tested on 2026-10-20, with every target window ending before the test reference date.
+A LightGBM classifier predicting `will_purchase_next_7d`. 50.8% of the 1,000 test users made a
+purchase. The model is trained on five stacked weekly reference dates (2026-10-12, 2026-10-19,
+2026-10-26, 2026-11-02, 2026-11-09; 5,000 train rows, one per user per date) and tested on 2026-11-16,
+with every target window ending before the test reference date.
 
-Headline over 5 simulation seeds (`reports/v1_1_seeds.json`, `results.aggregate.propensity.test`):
-ROC-AUC 0.866 +/- 0.017, PR-AUC 0.802 +/- 0.025.
+Headline over 5 simulation seeds (500 users, 45 days each; `reports/v1_1_seeds.json`,
+`results.aggregate.propensity.test`): ROC-AUC 0.845 +/- 0.021, PR-AUC 0.856 +/- 0.016.
 
 Seed 42 test set (`src/models/artifacts/propensity_metrics.json`, block `test`):
 
 | Metric | Test value | 95% CI (bootstrap) |
 | :--- | :--- | :--- |
-| ROC-AUC | 0.872 | 0.835 to 0.906 |
-| PR-AUC | 0.809 | 0.749 to 0.865 |
-| F1 at 0.5 | 0.789 | not computed |
-| Brier score | 0.137 | not computed |
+| ROC-AUC | 0.886 | 0.864 to 0.906 |
+| PR-AUC | 0.877 | 0.850 to 0.902 |
+| F1 at 0.5 | 0.805 | not computed |
+| Brier score | 0.136 | not computed |
 
-Baselines, on the same test set. A difference is the model minus the baseline:
+Baselines, on the same test set. A difference is the model minus the baseline. The artifact records
+the baseline values only, so no interval is given for the differences:
 
-| Baseline | ROC-AUC | PR-AUC | Difference in ROC-AUC (95% CI) |
+| Baseline | ROC-AUC | PR-AUC | Difference in ROC-AUC |
 | :--- | :--- | :--- | :--- |
-| Logistic regression | 0.888 | 0.815 | -0.015 (-0.032 to 0.000) |
-| Single feature: `total_purchases_30d` | 0.811 | 0.725 | +0.061 (+0.030 to +0.092) |
-
-The LightGBM model beats the single-feature baseline. Its difference from the logistic regression
-baseline is not significant: the interval includes zero.
+| Logistic regression | 0.880 | 0.874 | +0.005 |
+| Single feature: `total_purchases_30d` | 0.842 | 0.820 | +0.044 |
 
 **Calibration** means a predicted 70% should come true about 70% of the time. The calibration
-method (sigmoid) was chosen by 5-fold grouped cross-validation on the training data only, against
-uncalibrated and isotonic. On the test set, calibration changes the Brier score from 0.1370 to 0.1349,
-ROC-AUC from 0.8722 to 0.8732, and log loss from 0.4302 to 0.4246. The mean predicted probability is
-0.4253 against an observed rate of 0.4025. Risk bands: low below 0.2356, high at or above 0.6914.
+method (sigmoid) was chosen by 5-fold grouped cross-validation on the training data only. Grouped
+CV Brier scores were 0.1669 uncalibrated, 0.1641 sigmoid and 0.1644 isotonic. On the test set,
+calibration changes the Brier score from 0.1364 to 0.1365, ROC-AUC from 0.8858 to 0.8842, and log
+loss from 0.4171 to 0.4189. The mean predicted probability is 0.4853 uncalibrated and 0.5275
+calibrated, against an observed rate of 0.508. Risk bands: low below 0.4618, high at or above 0.7753
+(`src/models/artifacts/propensity_evaluation_summary.json`).
 
 **Lift** shows how useful the ranking is for targeting:
 
 | Users targeted (highest scores first) | Share of all buyers reached |
 | :--- | :--- |
-| Top 10% | 22.4% |
-| Top 20% | 41.0% |
-| Top 30% | 57.1% |
+| Top 10% | 19.1% |
+| Top 20% | 36.0% |
+| Top 30% | 51.8% |
 
-The top 10% of users (40 of 400) bought at 2.24 times the average rate: 36 of the 40 made a purchase
-(90.0%). Source: `src/models/artifacts/propensity_evaluation_summary.json`.
+The top 10% of users (100 of 1,000) bought at 1.91 times the average rate: 97 of the 100 made a
+purchase (97.0%). Source: `src/models/artifacts/propensity_evaluation_summary.json`.
 
 ### App switching
 
 Predicts whether the next purchase will happen on a different app than the user's usual one.
-26.0% of the 400 test users switched.
+32.9% of the 1,000 test users switched.
 
-Headline over 5 simulation seeds (`reports/v1_1_seeds.json`, `results.aggregate.switching.test`):
-ROC-AUC 0.799 +/- 0.044, PR-AUC 0.590 +/- 0.062.
+Headline over 5 simulation seeds (500 users, 45 days each; `reports/v1_1_seeds.json`,
+`results.aggregate.switching.test`): ROC-AUC 0.799 +/- 0.010, PR-AUC 0.650 +/- 0.038.
 
 Seed 42 test set (`src/models/artifacts/switching_metrics.json`, block `binary_test`):
 
 | Metric | Test value | 95% CI (bootstrap) |
 | :--- | :--- | :--- |
-| ROC-AUC | 0.798 | 0.746 to 0.846 |
-| PR-AUC | 0.548 | 0.453 to 0.661 |
-| F1 at 0.5 | 0.520 | not computed |
-| F1 at tuned threshold (0.38, tuned on training data) | 0.619 | not computed |
-| Three-class accuracy (no purchase / usual app / switched) | 0.698, macro F1 0.568 | not computed |
+| ROC-AUC | 0.846 | 0.821 to 0.870 |
+| PR-AUC | 0.712 | 0.663 to 0.760 |
+| F1 at 0.5 | 0.650 | not computed |
+| F1 at tuned threshold (0.38, tuned on training data) | 0.680 | not computed |
+| Three-class accuracy (no purchase / usual app / switched) | 0.696, macro F1 0.629 | not computed |
 
 Baselines, on the same test set. A difference is the model minus the baseline:
 
-| Baseline | ROC-AUC | PR-AUC | Difference in ROC-AUC (95% CI) |
+| Baseline | ROC-AUC | PR-AUC | Difference in ROC-AUC |
 | :--- | :--- | :--- | :--- |
-| Logistic regression | 0.823 | 0.578 | -0.025 (-0.052 to 0.002) |
-| Single feature: `total_purchases_30d` | 0.742 | 0.455 | +0.056 (+0.018 to +0.094) |
+| Logistic regression | 0.838 | 0.691 | +0.008 |
+| Single feature: `total_purchases_30d` | 0.788 | 0.614 | +0.058 |
 
-The buyers-only conditional model (`conditional_test`, 161 test users who bought) has ROC-AUC 0.716
-(95% CI 0.627 to 0.795). Its baseline, the dominant-app share, reaches 0.731, so the conditional
-model is 0.016 below that baseline.
+The conditional model (`conditional_test`, 508 test rows, positive rate 0.648) has ROC-AUC 0.761
+(95% CI 0.715 to 0.806). Its baseline, the dominant-app share, reaches 0.742, so the conditional
+model is 0.019 above that baseline.
 
 SHAP shows what drives switching (`top_shap_drivers` in `switching_metrics.json`; the chart is
 `switching_shap_importance.png`):
 
 | Rank | Feature | Mean absolute SHAP | Effect |
 | :--- | :--- | :--- | :--- |
-| 1 | View-to-cart ratio | 0.570 | Increases switching |
-| 2 | Days since last cart add | 0.151 | Reduces switching |
-| 3 | App entropy | 0.138 | Increases switching |
-| 4 | Days since last event | 0.136 | Reduces switching |
-| 5 | Sessions in the last 7 days | 0.128 | Increases switching |
+| 1 | Days since last event | 0.405 | Reduces switching |
+| 2 | Days since last purchase | 0.401 | Reduces switching |
+| 3 | View-to-cart ratio | 0.241 | Increases switching |
+| 4 | Dominant app share | 0.177 | Reduces switching |
+| 5 | Purchases in the last 30 days | 0.138 | Increases switching |
 
 ### Customer lifetime value
 
@@ -826,77 +827,78 @@ Gamma-Gamma estimates how much each purchase will be worth. Together they predic
 
 | Quantity | Value |
 | :--- | :--- |
-| Reference date | 2026-10-20 (the test reference date; the CLV model is cut here) |
+| Reference date | 2026-11-16 (the test reference date; the CLV model is cut here) |
 | Horizon | 30 days |
-| Customers modeled | 296 (236 repeat buyers, 1,663 transactions) |
-| Mean predicted 30-day CLV | INR 176,370 |
-| Median predicted 30-day CLV | INR 102,773 |
+| Customers modeled | 920 (843 repeat buyers, 10,582 transactions) |
+| Mean predicted 30-day CLV | INR 142,466 |
+| Median predicted 30-day CLV | INR 95,135 |
 | Source | `src/models/artifacts/clv_summary.json` |
 
 Mean predicted value by simulated shopper type:
 
 | Shopper type | Customers | Mean predicted CLV (INR) |
 | :--- | :--- | :--- |
-| Loyalist | 79 | 260,862 |
-| Impulse buyer | 80 | 194,137 |
-| Bargain hunter | 78 | 138,496 |
-| Comparison shopper | 44 | 73,571 |
-| Window shopper | 15 | 135,118 |
+| Impulse buyer | 187 | 185,612 |
+| Loyalist | 205 | 178,947 |
+| Comparison shopper | 194 | 142,841 |
+| Bargain hunter | 198 | 126,479 |
+| Window shopper | 136 | 50,889 |
 
-When Gamma-Gamma cannot produce a sensible estimate for a customer (for example, a single
-purchase), the model falls back to that customer's observed order value. This fallback is used for
-60 of 296 customers here (the order-value and purchase fallbacks each apply to 60), and it turned out
-to be essential on real data. The window shopper group (15 customers) has a higher mean than the
-comparison shopper group, which the earlier run did not show.
+When Gamma-Gamma cannot produce a sensible estimate for a customer (its q parameter is below one, so
+the mean is undefined), the model falls back to that customer's observed order value. This fallback is
+used for 77 of 920 customers here; the purchase-count fallback applies to none.
 
 ### CLV holdout validation
 
-The batch CLV model is cut at a calibration date (2026-10-18). The 9 days after it are held out and
+The batch CLV model is cut at a calibration date (2026-11-02). The 21 days after it are held out and
 used to check the predictions (`reports/v1_1_clv.json`, seed 42).
 
 | Quantity | Value |
 | :--- | :--- |
-| Customers with a holdout purchase | 167 of 288 |
-| Actual holdout purchases | 534 |
-| BG/NBD predicted purchases | 550.81 |
-| Naive baseline predicted purchases | 868.33 |
-| MAE of purchase count, BG/NBD | 1.605 |
-| MAE of purchase count, naive | 1.870 |
-| Spearman rank correlation, spend (BG/NBD and Gamma-Gamma) | 0.496 |
-| Spearman rank correlation, spend (naive) | 0.506 |
+| Customers with a holdout purchase | 692 of 908 |
+| Actual holdout purchases | 4,040 |
+| BG/NBD predicted purchases | 3,747.90 |
+| Naive baseline predicted purchases | 5,389.83 |
+| MAE of purchase count, BG/NBD | 2.629 |
+| MAE of purchase count, naive | 2.863 |
+| Spearman rank correlation, spend (BG/NBD and Gamma-Gamma) | 0.546 |
+| Spearman rank correlation, spend (naive) | 0.543 |
 
 Predicted against actual purchases, by past purchase frequency:
 
 | Past purchases | Customers | Mean predicted | Mean actual |
 | :--- | :--- | :--- | :--- |
-| 0 | 57 | 1.509 | 0.544 |
-| 1 | 46 | 1.092 | 0.457 |
-| 2 | 42 | 1.423 | 1.310 |
-| 3 to 5 | 83 | 1.936 | 1.855 |
-| 6 or more | 60 | 3.234 | 4.550 |
+| 0 | 98 | 1.720 | 0.704 |
+| 1 | 98 | 1.682 | 1.561 |
+| 2 | 73 | 2.205 | 2.068 |
+| 3 to 5 | 212 | 3.090 | 2.920 |
+| 6 or more | 427 | 6.085 | 7.138 |
 
 The Gamma-Gamma order value does not beat a simple average on this holdout. Its order-value MAE is
-16,748 against 12,416 for the observed mean and 12,455 for the shrunk estimate (`shrinkage_k` 3.0).
+16,259 against 12,755 for the observed mean and 12,116 for the shrunk estimate (`shrinkage_k` 3.0).
 The spend ranking is about as good as the naive baseline, not better.
 
-On the 288 BG/NBD-scorable customers, a regressor trained on the 400 train users (train reference
-2026-10-09, test reference 2026-10-18, 9-day horizon) reaches Spearman 0.621 with MAE 35,928. The
-BG/NBD and Gamma-Gamma combination on the same customers reaches Spearman 0.496 with MAE 42,954.
+On the 908 BG/NBD-scorable customers, a regressor trained on the 1,000 train users (train reference
+2026-10-12, test reference 2026-11-02, 21-day horizon) reaches Spearman 0.637 with MAE 84,649. The
+BG/NBD and Gamma-Gamma combination on the same customers reaches Spearman 0.546 with MAE 78,275.
+Across all 1,000 test users the regressor reaches Spearman 0.684 (MAE 77,909).
 
 ### Segmentation
 
-KMeans was tested with 3 to 6 clusters. Silhouette was 0.429 at k=3, 0.378 at k=4, 0.356 at k=5, and
-0.269 at k=6. k=3 was selected (Davies-Bouldin 1.061). HDBSCAN on the same features found 2 clusters and
-left 8.0% of users unassigned (32 of 400), so KMeans was kept for full coverage. A GMM comparison by BIC
-has its lowest value at 6 components; it is reported but not used. Agreement with the simulated
-archetypes (adjusted Rand index) is 0.364, and bootstrap stability is 0.969
+KMeans was tested with 3 to 6 clusters. Silhouette was 0.292 at k=3, 0.299 at k=4, 0.307 at k=5, and
+0.270 at k=6. k=5 was selected (Davies-Bouldin 1.214). HDBSCAN on the same features found 2 clusters and
+left 14.5% of users unassigned (145 of 1,000), so KMeans was kept for full coverage. A GMM comparison by
+BIC has its lowest value at 8 components; it is reported but not used. Agreement with the simulated
+archetypes (adjusted Rand index) is 0.255, and bootstrap stability is 0.844
 (`src/models/artifacts/segmentation_summary.json`).
 
 | Segment | Users | Purchases (30 days) | Spend (30 days, INR) | Mean predicted CLV (INR) |
 | :--- | :--- | :--- | :--- | :--- |
-| Bargain Hunters | 186 | 3.661 | 68,988 | 116,450 |
-| Window Shoppers | 132 | 0.030 | 237 | 368,464 |
-| Single-App Regulars | 82 | 5.951 | 147533 | 246695 |
+| Bargain Hunters | 76 | 1.97 | 35,708 | 46,470 |
+| Single-App Regulars | 319 | 9.74 | 232,792 | 203,198 |
+| Comparison Shoppers | 455 | 7.22 | 151,357 | 133,894 |
+| Window Shoppers | 98 | 0.01 | 11 | 38,553 |
+| Occasional Buyers | 52 | 0.04 | 685 | 15,375 |
 
 Segment names are assigned automatically from each cluster's distinguishing features. A cluster
 whose features do not support any name is labeled `Unclassified` rather than guessed.
@@ -1108,9 +1110,10 @@ noisy OCR-style screen text at a character noise rate of 0.01 (`SIMULATION_OCR_N
 `src/features/event_loader.py`, the single write path for batch loads and serving. Product, price, and
 action columns come from the extractor, not from simulator fields. Ground truth is written to
 `data/processed/simulation_truth.parquet` beside the raw events and is never loaded into the warehouse.
-The default load ran with `--workers 4`; it took 351 seconds in total for 138,242 events
-(`reports/v1_3_load.json`): 272 seconds waiting on extraction, 59 seconds resolving products, and 19
-seconds writing the warehouse.
+The default load ran with `--workers 4`. The timed load benchmark (400 users, 30 days, `reports/v1_3_load.json`)
+processed 37,079 events in 145 seconds: 3 seconds simulating, 16 seconds waiting on extraction, 125
+seconds resolving products, and 3 seconds writing the warehouse. The current default warehouse (1,000
+users, 60 days) holds 173,277 events.
 
 Schema version 2 adds the tables and columns that make this possible:
 
@@ -1236,7 +1239,7 @@ release tripwire G1.3-05 accepts a share from 0.35 to 0.65; the v1.0 value was 0
 make test             # or: .venv/bin/pytest -v
 ```
 
-The suite has **786 tests across 56 modules** and runs in under four minutes (232 seconds in the v1.3 release run). Serving tests run
+The suite has **892 tests** and runs in under five minutes (241 seconds in the S9 gate run). Serving tests run
 against a small simulated warehouse built in a temporary directory, never against the real
 warehouses. Beyond unit tests for each module, several tests guard properties that once broke,
 or could break, without any error:

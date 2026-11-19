@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "release": "1.4",
-  "generated_at": "2026-11-19T01:45:19+00:00",
-  "git_commit": "8aa356a",
+  "generated_at": "2026-11-19T04:20:07+00:00",
+  "git_commit": "1a90455",
   "seed": 42,
   "results": {
     "users": 500,
@@ -46,10 +46,10 @@
         ],
         "regression": {
           "n": 3941,
-          "coef_log_price_ratio": 0.4033825214251744,
-          "coef_later_is_dominant": 1.5309358572749259,
+          "coef_log_price_ratio": 0.40338252142517417,
+          "coef_later_is_dominant": 1.5309358572749256,
           "ci": {
-            "lo": -0.07253889144443178,
+            "lo": -0.07253889144443207,
             "hi": 0.8840474350173883,
             "n_boot_ok": 500
           }
@@ -83,10 +83,10 @@
         ],
         "regression": {
           "n": 3956,
-          "coef_log_price_ratio": -3.162718039709945,
-          "coef_later_is_dominant": 1.5813212630111768,
+          "coef_log_price_ratio": -3.1627180397099455,
+          "coef_later_is_dominant": 1.5813212630111764,
           "ci": {
-            "lo": -3.6864814296713235,
+            "lo": -3.686481429671323,
             "hi": -2.6899546630386513,
             "n_boot_ok": 500
           }
@@ -121,9 +121,9 @@
         "regression": {
           "n": 3950,
           "coef_log_price_ratio": -4.860312706370806,
-          "coef_later_is_dominant": 1.549805721125892,
+          "coef_later_is_dominant": 1.5498057211258918,
           "ci": {
-            "lo": -5.488067471003804,
+            "lo": -5.488067471003805,
             "hi": -4.312088035532664,
             "n_boot_ok": 500
           }
